@@ -1,19 +1,27 @@
 name: 'PullPreview'
-description: 'Automatically spin preview environments for your pull requests'
+description: 'Automatically spin and maintain preview environments for your pull requests'
+author: 'Cyril Rohr'
+branding:
+  icon: anchor
+  color: purple
 inputs:
   name:
     description: 'Name for the preview environment. Must be unique'
     required: true
   admins:
-    description: 'Logins of GitHub users that will have their SSH key installed on the instance'
+    description: 'Logins of GitHub users that will have their SSH key installed on the instance, comma-separated'
     required: false
     default: ''
   ports:
-    description: 'Ports to open for external access on the preview server (port 22 is always open)'
+    description: 'Ports to open for external access on the preview server (port 22 is always open), comma-separated'
     required: false
     default: "80/tcp,443/tcp,1000-10000/tcp"
+	default_port:
+		description: 'The port to use when building the preview URL'
+		required: false
+		default: "80"
   compose_files:
-    description: 'Compose files to use when running docker-compose up'
+    description: 'Compose files to use when running docker-compose up, comma-separated'
     required: false
     default: 'docker-compose.yml'
 outputs:
