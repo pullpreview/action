@@ -1,0 +1,38 @@
+#!/usr/bin/env ruby
+
+require "pathname"
+
+require_relative "../lib/pull_preview"
+
+STDOUT.sync = true
+STDERR.sync = true
+
+PullPreview.logger = Logger.new(STDOUT)
+PullPreview.logger.level = Logger::INFO
+PullPreview.lightsail = Aws::Lightsail::Client.new(region: ENV.fetch("AWS_REGION", "us-east-1"))
+
+begin
+  case ARGV.shift
+  when "down"
+    PullPreview::Down.run(ARGV)
+  when "up"
+    PullPreview::Up.run(ARGV)
+  when "sync-with-github"
+    PullPreview::SyncWithGithub.run(ARGV)
+  when "list"
+    PullPreview::List.run(ARGV)
+  else
+    puts "Usage: pullpreview [up|down|sync-with-github] [options]"
+    exit 1
+  end
+rescue PullPreview::Error => e
+  puts "Error: #{e.message}"
+  exit 1
+rescue Slop::Error => e
+  puts "CLI Error: #{e.message}"
+  exit 1
+rescue Aws::Lightsail::Errors::ServiceError => e
+  puts "AWS Error: #{e.message}"
+  PullPreview.logger.debug e.backtrace.join("\n")
+  exit 1
+end
