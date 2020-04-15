@@ -2,15 +2,21 @@ module PullPreview
   class Instance
     attr_reader :name
     attr_reader :authorized_users
+    attr_reader :ports_to_open
+    attr_reader :default_port
 
     class << self
       attr_accessor :client
       attr_accessor :logger
     end
 
-    def initialize(name, authorized_users = [])
+    def initialize(name, authorized_users = [], ports_to_open = [], default_port = nil)
       @name = name
       @authorized_users = authorized_users
+      @ports_to_open = ports_to_open
+      @default_port = default_port || "80"
+      # TODO: normalize
+      @ports_to_open = @ports_to_open.push(default_port).push("22").uniq.compact
       logger.info "Instance name=#{@name}"
     end
 
@@ -103,9 +109,9 @@ module PullPreview
       result 
     end
 
-    def open_ports(ports)
+    def open_ports
       client.put_instance_public_ports({
-        port_infos: ports.map do |port_definition|
+        port_infos: ports_to_open.map do |port_definition|
           port_range, protocol = port_definition.split("/", 2)
           protocol ||= "tcp"
           port_range_start, port_range_end = port_range.split("-", 2)
@@ -151,7 +157,8 @@ module PullPreview
     end
 
     def url
-      "http://#{public_ip}"
+      scheme = (default_port == "443" ? "https" : "http")
+      "#{scheme}://#{public_ip}:#{default_port}"
     end
 
     def ssh_address

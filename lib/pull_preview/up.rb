@@ -6,8 +6,12 @@ module PullPreview
     def self.run(cli_args)
       opts = Slop.parse do |o|
         o.banner = "Usage: pullpreview up path/to/app [options]"
-        o.string '--name', 'Unique name for the environment'
+        o.string '--name', 'Unique name for the environment', required: true
         o.array '--admins', 'Logins of GitHub users that will have their SSH key installed on the instance'
+        o.array '--ports', 'Ports to open for external access on the preview server', default: [
+          "80/tcp", "443/tcp", "1000-10000/tcp"
+        ]
+        o.string '--default-port', 'Default port to use when displaying the instance hostname', default: "80"
         o.array '--compose-files', 'Compose files to use when running docker-compose up', default: ["docker-compose.yml"]
         o.bool '-v', '--verbose', 'Enable verbose mode'
         o.on '--help' do
@@ -18,11 +22,6 @@ module PullPreview
 
       if opts.verbose?
         PullPreview.logger.level = Logger::DEBUG
-      end
-
-      if opts[:name].to_s.empty?
-        puts opts
-        exit 1
       end
 
       PullPreview.logger.debug "CLI options=#{opts.to_hash.inspect}"
@@ -55,7 +54,7 @@ module PullPreview
         exit 1
       end
 
-      instance = Instance.new(instance_name, authorized_users)
+      instance = Instance.new(instance_name, authorized_users, opts[:ports], opts[:default_port])
 
       unless instance.running?
         azs = PullPreview.lightsail.get_regions(include_availability_zones: true).regions.find do |region|
@@ -80,10 +79,7 @@ module PullPreview
         sleep 2
       end
 
-      instance.open_ports(
-        ["22", "80/tcp", "443/tcp", "1000-10000/tcp"]
-      )
-
+      instance.open_ports
       instance.wait_until_ssh_ready!
       instance.setup_ssh_access
 
@@ -100,8 +96,17 @@ module PullPreview
 
       instance.ssh("rm -f #{REMOTE_APP_PATH}/docker-compose.* && tar xzf /tmp/app.tar.gz -C #{REMOTE_APP_PATH} && cd #{REMOTE_APP_PATH} && docker-compose #{compose_files.map{|f| ["-f", f]}.flatten.join(" ")} up --build --remove-orphans -d && sleep 10 && docker-compose logs")
 
+      puts "::set-output name=url::#{instance.url}"
+      puts "::set-output name=host::#{instance.public_ip}"
+      puts "::set-output name=username::#{instance.username}"
+
       puts
-      puts "To connect to the instance (authorized GitHub users: #{instance.authorized_users.join(", ")}):"
+      puts "You can access your application at the following URL:"
+      puts "  #{instance.url}"
+      puts
+
+      puts
+      puts "To ssh into the instance (authorized GitHub users: #{instance.authorized_users.join(", ")}):"
       puts "  ssh #{instance.ssh_address}"
       puts
 
