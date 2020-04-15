@@ -2,58 +2,96 @@ require "octokit"
 
 module PullPreview
   class SyncWithGithub
+    attr_reader :octokit
+    attr_reader :github_context
+    attr_reader :app_path
+    # CLI options, already parsed
+    attr_reader :opts
+    attr_reader :always_on
+
     LABEL = "pullpreview"
 
-    def self.run(cli_args)
+    def self.run(app_path, opts)
       github_event_path = ENV.fetch("GITHUB_EVENT_PATH")
       # https://developer.github.com/v3/activity/events/types/#pushevent
       # https://help.github.com/en/actions/reference/events-that-trigger-workflows
       github_context = JSON.parse(File.read(github_event_path))
       github_token = ENV.fetch("GITHUB_TOKEN")
       octokit = Octokit::Client.new(access_token: github_token)
-
       PullPreview.logger.debug "context = #{github_context.inspect}"
 
-      self.new(octokit, github_context).sync!(cli_args)
+      self.new(octokit, github_context, app_path, opts).sync!
     end
 
-    attr_reader :octokit, :github_context
-
-    def initialize(octokit, github_context)
+    def initialize(octokit, github_context, app_path, opts)
       @octokit = octokit
       @github_context = github_context
+      @app_path = app_path
+      @opts = opts
+      @always_on = opts.delete(:always_on)
     end
 
-    def sync!(cli_args)
-      if pr_number.nil?
-        PullPreview.logger.error "Unable to find a matching PR for ref #{ref.inspect}"
-        exit 1
+    def sync!
+      if sha != latest_sha && !ENV.fetch("PULLPREVIEW_TEST", nil)
+        PullPreview.logger.info "A newer commit is present. Skipping current run."
+        return true
       end
 
-      if unlabeled?
+      case guess_action_from_event
+      when :pr_down, :branch_down
+        instance = Instance.new(instance_name)
+        return true unless instance.running?
         update_github_status(:destroying)
-        Down.run(cli_args)
-        update_github_status(:destroyed)
-      elsif labeled?
-        update_github_status(:deploying)
-        instance = Up.run(cli_args)
-        update_github_status(:deployed, instance.url)
-      elsif push?
-        if pr.labels.map {|label| label.name.downcase}.include?(LABEL)
-          update_github_status(:deploying)
-          PullPreview.logger.info "Found label #{LABEL} on PR##{pr_number}"
-          instance = Up.run(cli_args)
-          update_github_status(:deployed, instance.url)
-        else
-          PullPreview.logger.info "Unable to find label on PR##{pr_number}"
+        Down.run(name: instance_name)
+        if pr_closed?
+          PullPreview.logger.info "Removing label #{LABEL} from PR##{pr_number}..."
+          octokit.remove_label(repo, pr_number, LABEL)
         end
+        update_github_status(:destroyed)
+      when :pr_up, :pr_push, :branch_push
+        update_github_status(:deploying)
+        tags = default_instance_tags.push(*opts[:tags]).uniq
+        instance = Up.run(
+          app_path,
+          opts.merge(name: instance_name, tags: tags)
+        )
+        update_github_status(:deployed, instance.url)
       else
         PullPreview.logger.info "Ignoring event"
       end
     rescue => e
-      PullPreview.logger.error "Got error: #{e.message}"
-      PullPreview.logger.debug e.backtrace.join("\n")
       update_github_status(:error)
+      raise e
+    end
+
+    def guess_action_from_event
+      if pr_number.nil?
+        branch = ref.sub("refs/heads/", "")
+        if always_on.include?(branch)
+          return :branch_push
+        else
+          return :branch_down
+        end
+      end
+
+      # In case of labeled & unlabeled, we recheck what the PR currently has for
+      # labels since actions don't execute in the order they are triggered
+      if (pr_unlabeled? && !pr_has_label?(LABEL)) || (pr_closed? && pr_has_label?(LABEL))
+        return :pr_down
+      end
+
+      if pr_labeled? && pr_has_label?(LABEL)
+        return :pr_up
+      end
+
+      if push?
+        if pr_has_label?(LABEL)
+          action = :pr_push
+        else
+          PullPreview.logger.info "Unable to find label #{LABEL} on PR##{pr_number}"
+          return :ignored
+        end
+      end
     end
 
     def github_status_for(status)
@@ -72,9 +110,10 @@ module PullPreview
       # https://developer.github.com/v3/repos/statuses/#create-a-status
       params = {
         context: "PullPreview",
-        description: "Preview environment #{status.to_s}"
+        description: "Environment #{status.to_s}"
       }
       params.merge!(target_url: url) if url
+      PullPreview.logger.info "Setting commit status for repo=#{repo.inspect}, sha=#{sha.inspect}, params=#{params.inspect}"
       octokit.create_status(
         repo,
         sha,
@@ -84,11 +123,7 @@ module PullPreview
     end
 
     def org_name
-      if pull_request?
-        github_context["organization"]["login"]
-      else
-        github_context["repository"]["organization"]
-      end
+      github_context["organization"]["login"]
     end
 
     def repo_name
@@ -99,24 +134,32 @@ module PullPreview
       [org_name, repo_name].join("/")
     end
 
+    def repo_id
+      github_context["repository"]["id"]
+    end
+
+    def org_id
+      github_context["organization"]["id"]
+    end
+
     def ref
       github_context["ref"]
     end
 
+    def latest_sha
+      @latest_sha ||= if pull_request?
+        pr.head.sha
+      else
+        octokit.list_commits(repo, ref).first.sha
+      end
+    end
+
     def sha
-      pr.head.sha
-    end
-
-    def labeled?
-      pull_request? &&
-        github_context["action"] == "labeled" &&
-        github_context["label"]["name"] == LABEL
-    end
-
-    def unlabeled?
-      pull_request? &&
-        github_context["action"] == "unlabeled" &&
-        github_context["label"]["name"] == LABEL
+      if pull_request?
+        github_context["pull_request"]["head"]["sha"]
+      else
+        github_context["head_commit"]["id"]
+      end
     end
 
     def pull_request?
@@ -124,17 +167,41 @@ module PullPreview
     end
 
     def push?
-      !github_context.has_key?("pull_request")
+      !pull_request?
+    end
+
+    def pr_closed?
+      pull_request? &&
+        github_context["action"] == "closed"
+    end
+
+    def pr_labeled?
+      pull_request? &&
+        github_context["action"] == "labeled" &&
+        github_context["label"]["name"] == LABEL
+    end
+
+    def pr_unlabeled?
+      pull_request? &&
+        github_context["action"] == "unlabeled" &&
+        github_context["label"]["name"] == LABEL
+    end
+
+    def pr_has_label?(searched_label)
+      pr.labels.find{|label| label.name.downcase == searched_label.downcase}
     end
 
     def pr_number
       @pr_number ||= if pull_request?
         github_context["number"]
+      elsif pr_from_ref
+        pr_from_ref[:number]
       else
-        pr_from_ref.number
+        nil
       end
     end
 
+    # only used to retrieve the PR when the event is push
     def pr_from_ref
       @pr_from_ref ||= octokit.pull_requests(
         repo,
@@ -148,6 +215,24 @@ module PullPreview
         repo,
         pr_number
       )
+    end
+
+    def instance_name
+      if pr_number
+        ["gh", repo_id, "pr", pr_number].join("-")
+      else
+        # push on branch without PR
+        ["gh", repo_id, ref].join("-")
+      end
+    end
+
+    def default_instance_tags
+      [
+        ["org_name", org_name],
+        ["org_id", org_id],
+        ["repo_name", repo_name],
+        ["repo_id", repo_id],
+      ].map{|tag| tag.join(":")}
     end
   end
 end

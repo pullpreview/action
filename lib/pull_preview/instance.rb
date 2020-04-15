@@ -1,23 +1,45 @@
+require "erb"
+
 module PullPreview
   class Instance
     attr_reader :name
-    attr_reader :authorized_users
+    attr_reader :admins
+    attr_reader :ports
+    attr_reader :default_port
+    attr_reader :compose_files
 
     class << self
       attr_accessor :client
       attr_accessor :logger
     end
 
-    def initialize(name, authorized_users = [])
-      @name = name
-      @authorized_users = authorized_users
+    def initialize(name, opts = {})
+      @name = name.
+        gsub(/[^a-z0-9]/i, "-").
+        squeeze("-")[0..60].
+        gsub(/(^-|-$)/, "")
+
+      @admins = opts[:admins] || []
+      @default_port = opts[:default_port] || "80"
+      # TODO: normalize
+      @ports = (opts[:ports] || []).push(default_port).push("22").uniq.compact
+      @compose_files = opts[:compose_files] || ["docker-compose.yml"]
+      @ssh_results = []
       logger.info "Instance name=#{@name}"
     end
 
+    def remote_app_path
+      REMOTE_APP_PATH
+    end
+
     def ssh_public_keys
-      @ssh_public_keys ||= authorized_users.map do |github_username|
+      @ssh_public_keys ||= admins.map do |github_username|
         URI.open("https://github.com/#{github_username}.keys").read.split("\n")
       end.flatten.reject{|key| key.empty?}
+    end
+
+    def success?
+      @ssh_results.map(&:last).all?
     end
 
     def running?
@@ -64,6 +86,34 @@ module PullPreview
       end
     end
 
+    def erb_locals
+      {
+        remote_app_path: remote_app_path,
+        compose_files: compose_files,
+        public_ip: public_ip,
+        admins: admins,
+        url: url,
+      }
+    end
+
+    def update_script
+      PullPreview.data_dir.join("update_script.sh.erb")
+    end
+
+    def update_script_rendered
+      ERB.new(File.read(update_script)).result_with_hash(erb_locals)
+    end
+
+    def setup_update_script
+      tmpfile = Tempfile.new("update_script").tap do |f|
+        f.write update_script_rendered
+      end
+      tmpfile.flush
+      unless scp(tmpfile.path, "/tmp/update_script.sh", mode: "0755")
+        raise Error, "Unable to copy the update script on instance. Aborting."
+      end
+    end
+
     def setup_ssh_access
       File.open("/tmp/authorized_keys", "w+") do |f|
         f.write ssh_public_keys.join("\n")
@@ -103,7 +153,7 @@ module PullPreview
       result 
     end
 
-    def open_ports(ports)
+    def open_ports
       client.put_instance_public_ports({
         port_infos: ports.map do |port_definition|
           port_range, protocol = port_definition.split("/", 2)
@@ -139,7 +189,7 @@ module PullPreview
         cmd = "cat #{input.path} | #{cmd}"
       end
       logger.debug cmd
-      system(cmd)
+      system(cmd).tap {|result| @ssh_results.push([cmd, result])}
     end
 
     def username
@@ -151,7 +201,8 @@ module PullPreview
     end
 
     def url
-      "http://#{public_ip}"
+      scheme = (default_port == "443" ? "https" : "http")
+      "#{scheme}://#{public_ip}:#{default_port}"
     end
 
     def ssh_address

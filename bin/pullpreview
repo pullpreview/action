@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 
 require "pathname"
+require "pry"
+require "slop"
 
 require_relative "../lib/pull_preview"
 
@@ -8,21 +10,75 @@ STDOUT.sync = true
 STDERR.sync = true
 
 PullPreview.logger = Logger.new(STDOUT)
-PullPreview.logger.level = Logger::INFO
+PullPreview.logger.level = Logger.const_get(ENV.fetch("PULLPREVIEW_LOGGER_LEVEL", "INFO"))
 PullPreview.lightsail = Aws::Lightsail::Client.new(region: ENV.fetch("AWS_REGION", "us-east-1"))
+
+common_opts = lambda do |o|
+  o.bool '-v', '--verbose', 'Enable verbose mode' do
+    PullPreview.logger.level = Logger::DEBUG
+  end
+  o.on '--help' do
+    puts o
+    exit
+  end
+end
+
+up_opts = lambda do |o|
+  o.array '--admins', 'Logins of GitHub users that will have their SSH key installed on the instance'
+  o.array '--ports', 'Ports to open for external access on the preview server', default: [
+    "80/tcp", "443/tcp", "1000-10000/tcp"
+  ]
+  o.string '--default-port', 'Default port to use when displaying the instance hostname', default: "80"
+  o.array '--tags', 'Tags to add to the instance'
+  o.array '--compose-files', 'Compose files to use when running docker-compose up', default: ["docker-compose.yml"]
+end
 
 begin
   case ARGV.shift
   when "down"
-    PullPreview::Down.run(ARGV)
+    opts = Slop.parse do |o|
+      o.banner = "Usage: pullpreview down [options]"
+      o.string '--name', 'Name of the environment to destroy', required: true
+      common_opts.call(o)
+    end
+
+    PullPreview::Down.run(opts.to_hash)
   when "up"
-    PullPreview::Up.run(ARGV)
-  when "sync-with-github"
-    PullPreview::SyncWithGithub.run(ARGV)
+    opts = Slop.parse do |o|
+      o.banner = "Usage: pullpreview up path/to/app [options]"
+      o.string '--name', 'Unique name for the environment', required: true
+      common_opts.call(o)
+      up_opts.call(o)
+    end
+
+    app_path = opts.arguments.first
+    if app_path.nil?
+      puts opts
+      exit 1
+    end
+
+    PullPreview::Up.run(app_path, opts.to_hash)
+  when "github-sync"
+    opts = Slop.parse do |o|
+      o.banner = "Usage: pullpreview github-sync path/to/app [options]"
+      common_opts.call(o)
+      up_opts.call(o)
+      o.array '--always-on', 'List of branches to always deploy', default: []
+    end
+
+    app_path = opts.arguments.first
+    if app_path.nil?
+      puts opts
+      exit 1
+    end
+
+    PullPreview::SyncWithGithub.run(app_path, opts.to_hash)
+  when "console"
+    binding.pry
   when "list"
     PullPreview::List.run(ARGV)
   else
-    puts "Usage: pullpreview [up|down|sync-with-github] [options]"
+    puts "Usage: pullpreview [up|down|list|console|sync-with-github] [options]"
     exit 1
   end
 rescue PullPreview::Error => e

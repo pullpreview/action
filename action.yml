@@ -1,0 +1,59 @@
+name: 'PullPreview'
+description: 'Automatically spin and maintain preview environments for your pull requests'
+author: 'Cyril Rohr'
+branding:
+  icon: anchor
+  color: purple
+inputs:
+  app_path:
+    description: 'The path to your application containing a docker-compose file'
+    default: "/github/workspace"
+    required: false
+  always_on:
+    description: 'List of always-on branches, irrespective of whether they correspond to an open Pull Request, comma-separated'
+    default: ''
+  github_token:
+    description: 'The personal access token used to update the status of your commit'
+    default: "${{ github.token }}"
+  admins:
+    description: 'Logins of GitHub users that will have their SSH key installed on the instance, comma-separated'
+    required: false
+    default: ''
+  ports:
+    description: 'Ports to open for external access on the preview server (port 22 is always open), comma-separated'
+    required: false
+    default: "80/tcp,443/tcp,1000-10000/tcp"
+  default_port:
+    description: 'The port to use when building the preview URL'
+    required: false
+    default: "80"
+  compose_files:
+    description: 'Compose files to use when running docker-compose up, comma-separated'
+    required: false
+    default: 'docker-compose.yml'
+outputs:
+  url:
+    description: 'The URL of the application on the preview server'
+  host:
+    description: 'The hostname or IP address of the preview server'
+  username:
+    description: 'The username that can be used to SSH into the preview server'
+
+runs:
+  using: 'docker'
+  image: docker://pullpreview/pullpreview:latest
+  args:
+    - "github-sync"
+    - "${{ inputs.app_path }}"
+    - "--admins"
+    - "${{ inputs.admins }}"
+    - "--compose-files"
+    - "${{ inputs.compose_files }}"
+    - "--ports"
+    - "${{ inputs.ports }}"
+    - "--default-port"
+    - "${{ inputs.default_port }}"
+    - "--always-on"
+    - "${{ inputs.always_on }}"
+  env:
+    GITHUB_TOKEN: "${{ inputs.github_token }}"

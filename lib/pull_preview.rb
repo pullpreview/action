@@ -17,4 +17,8 @@ module PullPreview
     attr_accessor :logger
     attr_accessor :lightsail
   end
+
+  def self.data_dir
+    Pathname.new(__dir__).parent.join("data")
+  end
 end
