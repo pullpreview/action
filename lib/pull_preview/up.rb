@@ -47,9 +47,13 @@ module PullPreview
         end.blueprint_id
 
         bundle_id = PullPreview.lightsail.get_bundles.bundles.find do |bundle|
-          bundle.cpu_count >= 1 &&
-            (2..3).include?(bundle.ram_size_in_gb) &&
-            bundle.supported_platforms.include?("LINUX_UNIX")
+          if opts[:instance_type].nil? || opts[:instance_type].empty?
+            bundle.cpu_count >= 1 &&
+              (2..3).include?(bundle.ram_size_in_gb) &&
+              bundle.supported_platforms.include?("LINUX_UNIX")
+          else
+            bundle.bundle_id == opts[:instance_type]
+          end
         end.bundle_id
 
         instance.launch(azs.sample, bundle_id, blueprint_id, tags)

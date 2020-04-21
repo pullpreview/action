@@ -28,6 +28,7 @@ up_opts = lambda do |o|
   o.array '--ports', 'Ports to open for external access on the preview server', default: [
     "80/tcp", "443/tcp", "1000-10000/tcp"
   ]
+  o.string '--instance-type', 'Instance type to use', default: 'small_2_0'
   o.string '--default-port', 'Default port to use when displaying the instance hostname', default: "80"
   o.array '--tags', 'Tags to add to the instance'
   o.array '--compose-files', 'Compose files to use when running docker-compose up', default: ["docker-compose.yml"]
@@ -78,7 +79,7 @@ begin
   when "list"
     PullPreview::List.run(ARGV)
   else
-    puts "Usage: pullpreview [up|down|list|console|sync-with-github] [options]"
+    puts "Usage: pullpreview [up|down|list|console|github-sync] [options]"
     exit 1
   end
 rescue PullPreview::Error => e

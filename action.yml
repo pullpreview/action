@@ -31,6 +31,10 @@ inputs:
     description: 'Compose files to use when running docker-compose up, comma-separated'
     required: false
     default: 'docker-compose.yml'
+  instance_type:
+    description: 'Instance type to use'
+    required: false
+    default: 'small_2_0'
 outputs:
   url:
     description: 'The URL of the application on the preview server'
@@ -55,5 +59,7 @@ runs:
     - "${{ inputs.default_port }}"
     - "--always-on"
     - "${{ inputs.always_on }}"
+    - "--instance-type"
+    - "${{ inputs.instance_type }}"
   env:
     GITHUB_TOKEN: "${{ inputs.github_token }}"
