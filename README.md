@@ -85,4 +85,4 @@ jobs:
 
 If you are using this on a personal GitHub account for non-commercial purposes, it is free to run.
 
-If you are using this on an team GitHub account, there will be a license fee to pay once this reaches v1.
+If you are using this on an team GitHub account, there will be a license fee to pay once at some point.
