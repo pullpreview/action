@@ -48,7 +48,7 @@ module PullPreview
 
         bundle_id = PullPreview.lightsail.get_bundles.bundles.find do |bundle|
           bundle.cpu_count >= 1 &&
-            (1...3).include?(bundle.ram_size_in_gb) &&
+            (2..3).include?(bundle.ram_size_in_gb) &&
             bundle.supported_platforms.include?("LINUX_UNIX")
         end.bundle_id
 
