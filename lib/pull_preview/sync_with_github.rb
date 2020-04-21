@@ -2,7 +2,6 @@ require "octokit"
 
 module PullPreview
   class SyncWithGithub
-    attr_reader :octokit
     attr_reader :github_context
     attr_reader :app_path
     # CLI options, already parsed
@@ -16,19 +15,19 @@ module PullPreview
       # https://developer.github.com/v3/activity/events/types/#pushevent
       # https://help.github.com/en/actions/reference/events-that-trigger-workflows
       github_context = JSON.parse(File.read(github_event_path))
-      github_token = ENV.fetch("GITHUB_TOKEN")
-      octokit = Octokit::Client.new(access_token: github_token)
-      PullPreview.logger.debug "context = #{github_context.inspect}"
-
-      self.new(octokit, github_context, app_path, opts).sync!
+      PullPreview.logger.debug "github_context = #{github_context.inspect}"
+      self.new(github_context, app_path, opts).sync!
     end
 
-    def initialize(octokit, github_context, app_path, opts)
-      @octokit = octokit
+    def initialize(github_context, app_path, opts)
       @github_context = github_context
       @app_path = app_path
       @opts = opts
       @always_on = opts.delete(:always_on)
+    end
+
+    def octokit
+      PullPreview.octokit
     end
 
     def sync!
@@ -94,7 +93,7 @@ module PullPreview
       end
     end
 
-    def github_status_for(status)
+    def commit_status_for(status)
       case status
       when :error
         :error
@@ -105,21 +104,44 @@ module PullPreview
       end
     end
 
+    def deployment_status_for(status)
+      case status
+      when :error
+        :error
+      when :deployed
+        :success
+      when :destroyed
+        :inactive
+      when :deploying
+        :pending
+      when :destroying
+        nil
+      end
+    end
+
     def update_github_status(status, url = nil)
-      github_status = github_status_for(status)
+      commit_status = commit_status_for(status)
       # https://developer.github.com/v3/repos/statuses/#create-a-status
-      params = {
+      commit_status_params = {
         context: "PullPreview",
         description: "Environment #{status.to_s}"
       }
-      params.merge!(target_url: url) if url
-      PullPreview.logger.info "Setting commit status for repo=#{repo.inspect}, sha=#{sha.inspect}, params=#{params.inspect}"
+      commit_status_params.merge!(target_url: url) if url
+      PullPreview.logger.info "Setting commit status for repo=#{repo.inspect}, sha=#{sha.inspect}, status=#{commit_status.inspect}, params=#{commit_status_params.inspect}"
       octokit.create_status(
         repo,
         sha,
-        github_status.to_s,
-        params
+        commit_status.to_s,
+        commit_status_params
       )
+
+      deployment_status = deployment_status_for(status)
+      unless deployment_status.nil?
+        deployment_status_params = {}
+        deployment_status_params.merge!(environment_url: url) if url
+        PullPreview.logger.info "Setting deployment status for repo=#{repo.inspect}, sha=#{sha.inspect}, status=#{deployment_status.inspect}, params=#{deployment_status_params.inspect}"
+        octokit.create_deployment_status(deployment.url, deployment_status.to_s, deployment_status_params)
+      end
     end
 
     def org_name
@@ -160,6 +182,24 @@ module PullPreview
       else
         github_context["head_commit"]["id"]
       end
+    end
+
+    def deployment
+      @deployment ||= (find_deployment || create_deployment)
+    end
+
+    def find_deployment
+      octokit.list_deployments(repo, environment: instance_name, ref: sha).first
+    end
+
+    def create_deployment
+      octokit.create_deployment(
+        repo,
+        sha,
+        auto_merge: false,
+        environment: instance_name,
+        required_contexts: []
+      )
     end
 
     def pull_request?

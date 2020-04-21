@@ -21,4 +21,8 @@ module PullPreview
   def self.data_dir
     Pathname.new(__dir__).parent.join("data")
   end
+
+  def self.octokit
+    @octokit ||= Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN"))
+  end
 end
