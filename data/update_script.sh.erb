@@ -1,0 +1,57 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+APP_TARBALL="$1"
+
+lock_file="/tmp/update.lock"
+cleanup() {
+  rm -f "$lock_file"
+  rm -f "$APP_TARBALL"
+}
+
+trap cleanup EXIT INT TERM
+
+if [ -f "$lock_file" ]; then
+  echo "Previous operation in progress. Waiting for at most 30min before proceeding..."
+
+  for i in {1..1800}; do
+    sleep 1
+    if [ ! -f "$lock_file" ]; then
+      break
+    fi
+    echo "Waiting..."
+  done
+fi
+
+if [ -f "$lock_file" ]; then
+  echo "Previous operation considered in error. Forcing new operation to start..."
+  lock_cleanup
+fi
+
+exec 100>$lock_file || exit 1
+echo -n "Acquiring lock before proceeding... "
+flock -n 100 || exit 1
+echo "OK"
+
+
+rm -f <%= remote_app_path %>/docker-compose.*
+tar xzf "$1" -C "<%= remote_app_path %>"
+
+pull() {
+  docker-compose <%= compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
+}
+
+# pulling images sometimes result in 'unexpected EOF', so retry at most 5 times
+for i in {1..5}; do
+  if pull; then break ; fi
+done
+
+docker-compose <%= compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
+	--build \
+	--remove-orphans \
+	-d
+
+sleep 10
+docker-compose logs --tail 1000
