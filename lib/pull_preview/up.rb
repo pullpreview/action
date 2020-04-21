@@ -22,7 +22,7 @@ module PullPreview
       instance_name = opts[:name]
 
       PullPreview.logger.info "Taring up repository at #{app_path.inspect}..."
-      unless system("tar czf /tmp/app.tar.gz -C '#{app_path}' .")
+      unless system("tar czf /tmp/app.tar.gz --exclude .git -C '#{app_path}' .")
         exit 1
       end
 
