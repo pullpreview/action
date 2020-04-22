@@ -1,6 +1,6 @@
 FROM ruby:2-alpine
 
-RUN apk --no-cache add git openssh-client
+RUN apk --no-cache add git openssh-client less
 RUN gem install bundler
 WORKDIR /app
 COPY Gemfile .
