@@ -137,9 +137,12 @@ module PullPreview
 
       deployment_status = deployment_status_for(status)
       unless deployment_status.nil?
-        deployment_status_params = {}
+        deployment_status_params = {
+          headers: {accept: "application/vnd.github.ant-man-preview+json"},
+          auto_inactive: true
+        }
         deployment_status_params.merge!(environment_url: url) if url
-        PullPreview.logger.info "Setting deployment status for repo=#{repo.inspect}, sha=#{sha.inspect}, status=#{deployment_status.inspect}, params=#{deployment_status_params.inspect}"
+        PullPreview.logger.info "Setting deployment status for repo=#{repo.inspect}, branch=#{branch.inspect}, sha=#{sha.inspect}, status=#{deployment_status.inspect}, params=#{deployment_status_params.inspect}"
         octokit.create_deployment_status(deployment.url, deployment_status.to_s, deployment_status_params)
       end
     end
@@ -181,6 +184,14 @@ module PullPreview
         github_context["pull_request"]["head"]["sha"]
       else
         github_context["head_commit"]["id"]
+      end
+    end
+
+    def branch
+      if pull_request?
+        github_context["pull_request"]["head"]["ref"]
+      else
+        github_context["ref"].sub("refs/heads/", "")
       end
     end
 
