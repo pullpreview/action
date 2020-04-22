@@ -144,7 +144,8 @@ jobs:
         SECRET1: ${{ secrets.SECRET1 }}
         SECRET2: ${{ secrets.SECRET2 }}
       run: |
-        echo "VALUE1=$SECRET1\nVALUE2=$SECRET2" > .env
+        echo "VALUE1=$SECRET1" >> .env
+        echo "VALUE2=$SECRET2" >> .env
     - uses: pullpreview/action@v3
       env:
         AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
