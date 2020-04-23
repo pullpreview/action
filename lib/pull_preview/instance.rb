@@ -13,12 +13,15 @@ module PullPreview
       attr_accessor :logger
     end
 
-    def initialize(name, opts = {})
-      @name = name.
+    def self.normalize_name(name)
+      name.
         gsub(/[^a-z0-9]/i, "-").
         squeeze("-")[0..60].
         gsub(/(^-|-$)/, "")
+    end
 
+    def initialize(name, opts = {})
+      @name = normalize_name(name)
       @admins = opts[:admins] || []
       @default_port = opts[:default_port] || "80"
       # TODO: normalize

@@ -269,11 +269,14 @@ module PullPreview
     end
 
     def instance_name
-      if pr_number
-        ["gh", repo_id, "pr", pr_number].join("-")
-      else
-        # push on branch without PR
-        ["gh", repo_id, ref].join("-")
+      @instance_name ||= begin
+        name = if pr_number
+          ["gh", repo_id, "pr", pr_number].join("-")
+        else
+          # push on branch without PR
+          ["gh", repo_id, "branch", branch].join("-")
+        end
+        Instance.normalize_name(name)
       end
     end
 
