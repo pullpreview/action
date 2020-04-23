@@ -23,6 +23,8 @@ module PullPreview
   end
 
   def self.octokit
-    @octokit ||= Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN"))
+    @octokit ||= Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN")).tap do |client|
+      client.auto_paginate = true
+    end
   end
 end

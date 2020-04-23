@@ -21,7 +21,7 @@ module PullPreview
     end
 
     def initialize(name, opts = {})
-      @name = normalize_name(name)
+      @name = self.class.normalize_name(name)
       @admins = opts[:admins] || []
       @default_port = opts[:default_port] || "80"
       # TODO: normalize
@@ -142,7 +142,7 @@ module PullPreview
       end
     end
 
-    def wait_until(max_retries = 20, interval = 3, &block)
+    def wait_until(max_retries = 30, interval = 5, &block)
       result = true
       retries = 0
       until block.call

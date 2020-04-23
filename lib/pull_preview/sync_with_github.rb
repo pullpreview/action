@@ -19,6 +19,15 @@ module PullPreview
       self.new(github_context, app_path, opts).sync!
     end
 
+    def self.clear_deployments_for(repo, environment)
+      deploys = PullPreview.octokit.list_deployments(repo, environment: environment)
+      deploys.each do |deployment|
+        PullPreview.octokit.delete(deployment.url)
+      end
+    rescue => e
+      PullPreview.logger.warn "Unable to clear deployments for environment #{environment.inspect}: #{e.message}"
+    end
+
     def initialize(github_context, app_path, opts)
       @github_context = github_context
       @app_path = app_path
@@ -144,6 +153,9 @@ module PullPreview
         deployment_status_params.merge!(environment_url: url) if url
         PullPreview.logger.info "Setting deployment status for repo=#{repo.inspect}, branch=#{branch.inspect}, sha=#{sha.inspect}, status=#{deployment_status.inspect}, params=#{deployment_status_params.inspect}"
         octokit.create_deployment_status(deployment.url, deployment_status.to_s, deployment_status_params)
+        if status == :destroyed
+          self.class.clear_deployments_for(repo, instance_name)
+        end
       end
     end
 
