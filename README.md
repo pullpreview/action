@@ -76,12 +76,12 @@ Examples).
 
 To install PullPreview, the workflow is very simple:
 
-1. Add the PullPreview action to a workflow file in your repository, for instance `.github/workflows/pullpreview.yml` (see [example][example]).
+1. Add the PullPreview action to a workflow file in your repository, for instance `.github/workflows/pullpreview.yml` (see [examples][examples]).
 2. Add the required `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets in your repository settings.
 3. Open a PR, and add the `pullpreview` label on it (you may have to create the label first).
 4. The PullPreview Action is triggered, a server provisioned, and the PR is updated with the deployment status and the URL to the preview environment.
 
-[example]: https://github.com/pullpreview/pullpreview-example-rails-app/blob/master/.github/workflows/pullpreview.yml
+[examples]: #examples
 
 Note: The AWS user needs to have IAM read/write permissions on EC2 resources.
 You may want to create a dedicated AWS sub-account for all your preview
