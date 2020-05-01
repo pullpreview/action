@@ -4,6 +4,8 @@ Automatic **preview environments**, synchronized on every code change.
 
 * For Product Owners: Interact with a new feature as it's built, give valuable feedback earlier, reduce wasted development time.
 * For Developers: Show your work in progress, find bugs early, deliver the right feature.
+* For Ops: No more temporary staging environments to provision and maintain. Environments are automatically started and destroyed when needed.
+* For CTOs: It's cheap! The code stays on your and GitHub's servers at all times.
 
 ## Trigger deployments directly from your Pull Requests
 
@@ -81,7 +83,9 @@ To install PullPreview, the workflow is very simple:
 
 [example]: https://github.com/pullpreview/pullpreview-example-rails-app/blob/master/.github/workflows/pullpreview.yml
 
-Note: this will currently spawn 2GB lightsail instances ($10/month), prorated to the duration of the preview.
+Note: The AWS user needs to have IAM read/write permissions on EC2 resources.
+You may want to create a dedicated AWS sub-account for all your preview
+environments.
 
 ## Action inputs
 
