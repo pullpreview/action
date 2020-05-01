@@ -20,7 +20,7 @@ module PullPreview
     end
 
     def self.clear_deployments_for(repo, environment)
-      deploys = PullPreview.octokit.list_deployments(repo, environment: environment)
+      deploys = PullPreview.octokit.list_deployments(repo, environment: environment, per_page: 100)
       deploys.each do |deployment|
         PullPreview.octokit.delete(deployment.url)
       end

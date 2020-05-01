@@ -25,6 +25,7 @@ end
 
 up_opts = lambda do |o|
   o.array '--admins', 'Logins of GitHub users that will have their SSH key installed on the instance'
+  o.bool '--dns', 'Enable DNS support for pretty-looking URLs'
   o.array '--ports', 'Ports to open for external access on the preview server', default: [
     "80/tcp", "443/tcp", "1000-10000/tcp"
   ]

@@ -1,13 +1,21 @@
 # PullPreview Action
 
-This action allows you to automatically deploy your pull requests on preview
-environments, synchronized with every push.
+Automatic **preview environments**, synchronized on every code change.
 
-It will:
+* For Product Owners: Interact with a new feature as it's built, give valuable feedback earlier, reduce wasted development time.
+* For Developers: Show your work in progress, find bugs early, deliver the right feature.
 
-1. Check out your code
+## Trigger deployments directly from your Pull Requests
+
+Once installed in your repository, this action is triggered any time a change
+is made to Pull Requests labelled with the `pullpreview` label, or one of the
+*always-on* branches.
+
+Once triggered it will:
+
+1. Check out the repository code
 2. Provision a cheap AWS Lightsail instance, with docker and docker-compose set up
-3. Continuously deploy selected Pull Requests and Branches, using the specified docker-compose file
+3. Continuously deploy selected Pull Requests and Branches, using the specified docker-compose file(s)
 4. Report the preview instance URL in the GitHub UI
 
 It is designed to be the **no-nonsense** alternative to services that require
@@ -19,28 +27,50 @@ and go on with your life.
 
 Preview environments that:
 
-* work with your **existing tooling**: If your app can be started with docker-compose, it can be deployed to preview environments with PullPreview.
+* work with your **existing tooling**: If your app can be started with
+  docker-compose, it can be deployed to preview environments with PullPreview.
 
-* can be **started and destroyed easily**: You can manage preview environments by adding or removing the `pullpreview` label on your Pull Requests. You can set specific branches as always on, for instance to continuously deploy your master branch.
+* can be **started and destroyed easily**: You can manage preview environments
+  by adding or removing the `pullpreview` label on your Pull Requests. You can
+set specific branches as always on, for instance to continuously deploy your
+master branch.
 
-* are **cheap too run**: Preview environments are launched on AWS Lightsail instances, which are both very cheap (10USD per month, proratized to the duration of the PR), and all costs included (bandwith, storage, etc.)
+* are **cheap too run**: Preview environments are launched on AWS Lightsail
+  instances, which are both very cheap (10USD per month, proratized to the
+duration of the PR), and all costs included (bandwith, storage, etc.)
 
-* take the **privacy** of your code seriously: The workflow happens all within a GitHub Action, which means your code never leaves GitHub or your Lightsail instances.
+* take the **privacy** of your code seriously: The workflow happens all within
+  a GitHub Action, which means your code never leaves GitHub or your Lightsail
+instances.
 
-* make the preview URL **easy to find** for your reviewers: Deployment statuses and URLs are visible in the PR checks section, and on the Deployments tab in the GitHub UI.
+* make the preview URL **easy to find** for your reviewers: Deployment statuses
+  and URLs are visible in the PR checks section, and on the Deployments tab in
+the GitHub UI.
 
-* **persist state** across deploys: Any state stored in docker volumes (e.g. database data) will be persisted across deploys, making the life of reviewers easier.
+* **persist state** across deploys: Any state stored in docker volumes (e.g.
+  database data) will be persisted across deploys, making the life of reviewers
+easier.
 
-* are **easy to troubleshoot**: You can give specific GitHub users the authorization to SSH into the preview instance (with sudo privileges) to further troubleshoot any issue. The SSH keys that they use to push to GitHub will automatically be installed on the preview servers.
+* are **easy to troubleshoot**: You can give specific GitHub users the
+  authorization to SSH into the preview instance (with sudo privileges) to
+further troubleshoot any issue. The SSH keys that they use to push to GitHub
+will automatically be installed on the preview servers.
 
-* are **integrated into the GitHub UI**: Logs for each deployment run are available within the Actions section, and direct links to the preview environments are available in the Checks section of a PR, and in the Deployments tab of the repository.
+* are **integrated into the GitHub UI**: Logs for each deployment run are
+  available within the Actions section, and direct links to the preview
+environments are available in the Checks section of a PR, and in the
+Deployments tab of the repository.
 
 ## Installation
 
 With PullPreview, the only requisite is to have a working docker-compose file
 (all versions supported), that can spin your whole environment.
 
-**Note :** If your compose files requires additional files at runtime that are not checked into the git repository (typically a `.env` file containing credentials specific to your preview environment), you can easily generate that file from GitHub Secrets by using an additional step in the workflow (see Examples).
+**Note :** If your compose files requires additional files at runtime that are
+not checked into the git repository (typically a `.env` file containing
+credentials specific to your preview environment), you can easily generate that
+file from GitHub Secrets by using an additional step in the workflow (see
+Examples).
 
 To install PullPreview, the workflow is very simple:
 
@@ -55,49 +85,39 @@ Note: this will currently spawn 2GB lightsail instances ($10/month), prorated to
 
 ## Action inputs
 
-### `always_on`
+* `always_on`: By default PullPreview only deploys Pull Requests. With this
+  setting you can also request specific branches to always be deployed.
+Defaults to none.
 
-By default PullPreview only deploys Pull Requests. With this setting you can also request specific branches to always be deployed. Defaults to none.
+* `admins`: Logins of GitHub users that will have their SSH key installed on
+  the instance, comma-separated. Defaults to none, which means you won't have
+SSH access. We suggest you set at least one GitHub login (e.g. `crohr`).
 
-### `admins`
+* `ports`: Ports to open for external access on the preview server (port 22 is
+  always open), comma-separated. Defaults to `80/tcp,443/tcp,1000-10000/tcp`.
 
-Logins of GitHub users that will have their SSH key installed on the instance, comma-separated. Defaults to none, which means you won't have SSH access. We suggest you set at least one GitHub login (e.g. `crohr`).
+* `default_port`: The port to use when building the preview URL. Defaults to `80`.
 
-### `ports`
+* `compose_files`: Compose files to use when running docker-compose up,
+  comma-separated. Defaults to `docker-compose.yml`.
 
-Ports to open for external access on the preview server (port 22 is always open), comma-separated. Defaults to `80/tcp,443/tcp,1000-10000/tcp`.
-
-### `default_port`
-
-The port to use when building the preview URL. Defaults to `80`.
-
-### `compose_files`
-
-Compose files to use when running docker-compose up, comma-separated. Defaults to `docker-compose.yml`.
-
-### `instance_type`
-
-Instance type to use. Defaults to `small_2_0` (1CPU, 2GB RAM, 10$/month)
+* `instance_type`: Instance type to use. Defaults to `small_2_0` (1CPU, 2GB
+  RAM, 10$/month)
 
 ## Action outputs
 
-### `url`
+* `url`: The preview environment URL.
 
-The URL of the application on the preview server.
+* `host`: The hostname or IP address of the preview server.
 
-### `host`
-
-The hostname or IP address of the preview server.
-
-### `username`
-
-The username that can be used to SSH into the preview server.
+* `username`: The username that can be used to SSH into the preview server.
 
 ## Examples
 
-A basic workflow file that allows 2 users SSH access into the preview environments, as well as marking the `master` branch as always on.
+A basic workflow file that allows 2 users SSH access into the preview
+environments, as well as marking the `master` branch as always on.
 
-```
+```yaml
 # .github/workflows/pullpreview.yml
 name: PullPreview
 on:
@@ -114,7 +134,7 @@ jobs:
     - uses: actions/checkout@v2
     - uses: pullpreview/action@v3
       with:
-        admins: crohr,user2
+        admins: crohr,other-github-user
         always_on: master
       env:
         AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
@@ -124,7 +144,7 @@ jobs:
 
 A workflow file that demonstrates how to use GitHub Secrets to generate a custom .env file for use in your docker-compose YAML file:
 
-```
+```yaml
 # .github/workflows/pullpreview.yml
 name: PullPreview
 on:
@@ -154,12 +174,17 @@ jobs:
 
 ## Is this free?
 
-The code for this Action is completely open source, and licensed under the Prosperity Public License (see LICENSE).
+The code for this Action is completely open source, and licensed under the
+Prosperity Public License (see LICENSE).
 
-If you are a non-profit, then it is free to run (in that case, please tell me so and/or pass the word around!).
+If you are a non-profit, then it is free to run (in that case, please tell me
+so and/or pass the word around!).
 
-In all other cases, you must buy a license. A license is valid for a year, and costs 120EUR/year.
+In all other cases, you must buy a license. A license is valid for a year, and
+costs 120EUR/year.
 
-Send an email to [support@pullpreview.com](mailto:support@pullpreview.com?subject=License) for details.
+Send an email to
+[support@pullpreview.com](mailto:support@pullpreview.com?subject=License) for
+details.
 
 Thanks!
