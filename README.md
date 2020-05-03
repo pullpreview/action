@@ -1,13 +1,13 @@
-# PullPreview Action
+# PullPreview
 
-Automatic **preview environments**, synchronized on every code change.
+A GitHub Action that starts live environments for your pull requests.
 
 * For Product Owners: Interact with a new feature as it's built, give valuable feedback earlier, reduce wasted development time.
 * For Developers: Show your work in progress, find bugs early, deliver the right feature.
-* For Ops: No more temporary staging environments to provision and maintain. Environments are automatically started and destroyed when needed.
-* For CTOs: It's cheap! The code stays on your and GitHub's servers at all times.
+* For Ops: Concentrate on high value tasks, not maintaining staging environments.
+* For CTOs: Don't let your code run on third-party servers: your code always stays private on either GitHub's or your servers.
 
-## Trigger deployments directly from your Pull Requests
+## Spin environments in one click
 
 Once installed in your repository, this action is triggered any time a change
 is made to Pull Requests labelled with the `pullpreview` label, or one of the
@@ -20,10 +20,15 @@ Once triggered it will:
 3. Continuously deploy selected Pull Requests and Branches, using the specified docker-compose file(s)
 4. Report the preview instance URL in the GitHub UI
 
-It is designed to be the **no-nonsense** alternative to services that require
-your app to either fit within their specific system and config files, or try to
-force kubernetes on you while all you wanted was to deploy your app for review
-and go on with your life.
+It is designed to be the **no-nonsense, cheap, and secure** alternative to
+services that require access to your code and force your app to fit within
+their specific deployment system and/or require a specific config file.
+
+<img src="img/2-add-label.png">
+<img src="img/3-deploy-starts.png">
+<img src="img/5-view-deployment.png">
+<img src="img/6-deploy-next-commit-pending.png">
+
 
 ## Features
 
@@ -63,29 +68,38 @@ will automatically be installed on the preview servers.
 environments are available in the Checks section of a PR, and in the
 Deployments tab of the repository.
 
+<img src="img/4-view-logs.png" />
+<img src="img/8-list-deployments.png" />
+
 ## Installation
 
-With PullPreview, the only requisite is to have a working docker-compose file
-(all versions supported), that can spin your whole environment.
+1. Make sure your application has a valid Docker Compose file that can boot a
+   complete environment. All versions are supported. By default it assumes a
+compose file in the root of your repository, named `docker-compose.yml`.
 
-**Note :** If your compose files requires additional files at runtime that are
+2. Get the required `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets
+   from your AWS account, and add them to your repository settings on GitHub,
+under the *Secrets* section.
+
+3. Create the `pullpreview` label in your repository, assign whatever color you like.
+
+4. Add the PullPreview workflow file in `.github/workflows/pullpreview.yml` (see [examples][examples]).
+
+5. PullPreview is now ready to be used: open a PR, add the `pullpreview` label, and you're done.
+
+**Notes:**
+
+* The AWS user needs to have IAM read/write permissions on EC2 resources.
+You may want to create a dedicated AWS sub-account for all your preview
+environments.
+
+* If your Compose file(s) requires additional files at runtime that are
 not checked into the git repository (typically a `.env` file containing
 credentials specific to your preview environment), you can easily generate that
 file from GitHub Secrets by using an additional step in the workflow (see
-Examples).
-
-To install PullPreview, the workflow is very simple:
-
-1. Add the PullPreview action to a workflow file in your repository, for instance `.github/workflows/pullpreview.yml` (see [examples][examples]).
-2. Add the required `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets in your repository settings.
-3. Open a PR, and add the `pullpreview` label on it (you may have to create the label first).
-4. The PullPreview Action is triggered, a server provisioned, and the PR is updated with the deployment status and the URL to the preview environment.
+[examples][examples]).
 
 [examples]: #examples
-
-Note: The AWS user needs to have IAM read/write permissions on EC2 resources.
-You may want to create a dedicated AWS sub-account for all your preview
-environments.
 
 ## Action inputs
 
@@ -146,7 +160,8 @@ jobs:
         AWS_REGION: "us-east-1"
 ```
 
-A workflow file that demonstrates how to use GitHub Secrets to generate a custom .env file for use in your docker-compose YAML file:
+A workflow file that demonstrates how to use GitHub Secrets to generate a
+custom .env file for use in your docker-compose YAML file:
 
 ```yaml
 # .github/workflows/pullpreview.yml
@@ -163,7 +178,7 @@ jobs:
     timeout-minutes: 30
     steps:
     - uses: actions/checkout@v2
-    - name: Generate .env file
+    - name: Generate env file
       env:
         SECRET1: ${{ secrets.SECRET1 }}
         SECRET2: ${{ secrets.SECRET2 }}
