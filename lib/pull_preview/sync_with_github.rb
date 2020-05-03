@@ -48,7 +48,10 @@ module PullPreview
       case guess_action_from_event
       when :pr_down, :branch_down
         instance = Instance.new(instance_name)
-        return true unless instance.running?
+        unless instance.running?
+          PullPreview.logger.info "Ignoring event"
+          return true
+        end
         update_github_status(:destroying)
         Down.run(name: instance_name)
         if pr_closed?

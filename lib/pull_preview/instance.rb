@@ -28,7 +28,6 @@ module PullPreview
       @ports = (opts[:ports] || []).push(default_port).push("22").uniq.compact
       @compose_files = opts[:compose_files] || ["docker-compose.yml"]
       @ssh_results = []
-      logger.info "Instance name=#{@name}"
     end
 
     def remote_app_path

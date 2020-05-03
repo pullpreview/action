@@ -35,6 +35,7 @@ module PullPreview
       )
 
       unless instance.running?
+        PullPreview.logger.info "Starting instance name=#{instance.name}"
         azs = PullPreview.lightsail.get_regions(include_availability_zones: true).regions.find do |region|
           region.name == aws_region
         end.availability_zones.map(&:zone_name)
@@ -61,6 +62,7 @@ module PullPreview
         sleep 2
       end
 
+      PullPreview.logger.info "Synchronizing instance name=#{instance.name}"
       instance.open_ports
       instance.wait_until_ssh_ready!
       instance.setup_ssh_access
