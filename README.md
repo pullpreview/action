@@ -143,7 +143,7 @@ jobs:
       env:
         AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
         AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-        AWS_REGION=us-east-1
+        AWS_REGION: "us-east-1"
 ```
 
 A workflow file that demonstrates how to use GitHub Secrets to generate a custom .env file for use in your docker-compose YAML file:
