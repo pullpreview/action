@@ -8,11 +8,11 @@ Once installed in your repository, this action is triggered any time a change
 is made to Pull Requests labelled with the `pullpreview` label, or one of the
 *always-on* branches.
 
-Once triggered it will:
+When triggered, it will:
 
 1. Check out the repository code
 2. Provision a cheap AWS Lightsail instance, with docker and docker-compose set up
-3. Continuously deploy selected Pull Requests and Branches, using the specified docker-compose file(s)
+3. Continuously deploy the specified pull requests and branches, using your docker-compose file(s)
 4. Report the preview instance URL in the GitHub UI
 
 It is designed to be the **no-nonsense, cheap, and secure** alternative to
