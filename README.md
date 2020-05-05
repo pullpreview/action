@@ -81,12 +81,9 @@ Deployments tab of the repository.
 The code for this Action is completely open source, and licensed under the
 Prosperity Public License (see LICENSE).
 
-If you are a non-profit, then it is free to run (in that case, please tell me
+If you are a non-profit individual, then it is free to run (in that case, please tell me
 so and/or pass the word around!).
 
-In all other cases, you must buy a license. A license is valid for a year, and
-costs 120EUR/year.
+In all other cases, you must buy a license. More details on [pullpreview.com](https://pullpreview.com).
 
-More details on [pullpreview.com](https://pullpreview.com).
-
-Thanks!
+Thanks for reading until the end!
