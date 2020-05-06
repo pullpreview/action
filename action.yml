@@ -45,7 +45,7 @@ outputs:
 
 runs:
   using: 'docker'
-  image: docker://pullpreview/pullpreview:latest
+  image: docker://pullpreview/pullpreview:v3
   args:
     - "github-sync"
     - "${{ inputs.app_path }}"
