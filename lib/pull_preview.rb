@@ -10,6 +10,7 @@ require_relative "./pull_preview/sync_with_github"
 require_relative "./pull_preview/list"
 
 module PullPreview
+  VERSION = "1.0.0"
   REMOTE_APP_PATH = "/app"
   STACK_NAME = "pullpreview"
 

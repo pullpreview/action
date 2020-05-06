@@ -297,10 +297,11 @@ module PullPreview
 
     def default_instance_tags
       [
-        ["org_name", org_name],
-        ["org_id", org_id],
         ["repo_name", repo_name],
         ["repo_id", repo_id],
+        ["org_name", org_name],
+        ["org_id", org_id],
+        ["version", PullPreview::VERSION],
       ].map{|tag| tag.join(":")}
     end
   end

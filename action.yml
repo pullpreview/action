@@ -12,6 +12,9 @@ inputs:
   always_on:
     description: 'List of always-on branches, irrespective of whether they correspond to an open Pull Request, comma-separated'
     default: ''
+  dns:
+    description: 'Which DNS suffix to use'
+    default: 'my.pullpreview.com'
   github_token:
     description: 'The personal access token used to update the status of your commit'
     default: "${{ github.token }}"
@@ -53,6 +56,8 @@ runs:
     - "${{ inputs.admins }}"
     - "--compose-files"
     - "${{ inputs.compose_files }}"
+    - "--dns"
+    - "${{ inputs.dns }}"
     - "--ports"
     - "${{ inputs.ports }}"
     - "--default-port"

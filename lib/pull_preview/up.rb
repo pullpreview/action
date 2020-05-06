@@ -31,7 +31,8 @@ module PullPreview
         admins: opts[:admins],
         ports: opts[:ports],
         default_port: opts[:default_port],
-        compose_files: compose_files
+        compose_files: compose_files,
+        dns: opts[:dns],
       )
 
       unless instance.running?

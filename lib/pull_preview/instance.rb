@@ -2,11 +2,12 @@ require "erb"
 
 module PullPreview
   class Instance
-    attr_reader :name
     attr_reader :admins
-    attr_reader :ports
-    attr_reader :default_port
     attr_reader :compose_files
+    attr_reader :default_port
+    attr_reader :dns
+    attr_reader :name
+    attr_reader :ports
 
     class << self
       attr_accessor :client
@@ -27,6 +28,7 @@ module PullPreview
       # TODO: normalize
       @ports = (opts[:ports] || []).push(default_port).push("22").uniq.compact
       @compose_files = opts[:compose_files] || ["docker-compose.yml"]
+      @dns = opts[:dns]
       @ssh_results = []
     end
 
@@ -202,9 +204,16 @@ module PullPreview
       access_details.ip_address
     end
 
+    def public_dns
+      [
+        [public_ip.gsub(".", "-"), name].join("-"),
+        dns
+      ].join(".")
+    end
+
     def url
       scheme = (default_port == "443" ? "https" : "http")
-      "#{scheme}://#{public_ip}:#{default_port}"
+      "#{scheme}://#{public_dns}:#{default_port}"
     end
 
     def ssh_address
