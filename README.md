@@ -74,6 +74,12 @@ Deployments tab of the repository.
 
 ## Installation & Usage
 
+* [Getting Started](https://github.com/pullpreview/action/wiki/Getting-Started)
+* Action [Inputs](https://github.com/pullpreview/action/wiki/Inputs) / [Outputs](https://github.com/pullpreview/action/wiki/Outputs)
+* Handling [Seed Data](https://github.com/pullpreview/action/wiki/Seed-Data)
+* [Workflow Examples](https://github.com/pullpreview/action/wiki/Workflow-Examples)
+* [FAQ](https://github.com/pullpreview/action/wiki/FAQ)
+
 &rarr; Please see the [wiki](https://github.com/pullpreview/action/wiki) for the full documentation.
 
 ## Is this free?
