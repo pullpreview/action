@@ -82,6 +82,45 @@ Deployments tab of the repository.
 
 &rarr; Please see the [wiki](https://github.com/pullpreview/action/wiki) for the full documentation.
 
+## Example
+
+Workflow file with the `master` branch always on:
+
+```yaml
+# .github/workflows/pullpreview.yml
+name: PullPreview
+on:
+  push:
+  pull_request:
+    types: [labeled, unlabeled, closed]
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v2
+    - uses: pullpreview/action@v3
+      with:
+        # Those GitHub users will have SSH access to the servers
+        admins: crohr,other-github-user
+        # A staging environment will always exist for the master branch
+        always_on: master
+        # PullPreview will use those 2 files when running docker-compose up
+        compose_files: docker-compose.yml,docker-compose.staging.yml
+        # The preview URL will target this port
+        default_port: 80
+        # Use a 512MB RAM instance type instead of the default 2GB
+        instance_type: nano_2_0
+        # Ports to open on the server
+        ports: 80,5432
+      env:
+        AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+        AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+        AWS_REGION: "us-east-1"
+```
+
 ## Is this free?
 
 The code for this Action is completely open source, and licensed under the
