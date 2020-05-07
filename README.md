@@ -1,6 +1,6 @@
 # PullPreview
 
-A GitHub Action that starts live environments for your pull requests.
+A GitHub Action that starts live environments for your pull requests and branches.
 
 ## Spin environments in one click
 
