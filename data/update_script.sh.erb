@@ -4,6 +4,7 @@ set -e
 set -o pipefail
 
 APP_TARBALL="$1"
+PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
 
 lock_file="/tmp/update.lock"
 cleanup() {
@@ -35,12 +36,22 @@ echo -n "Acquiring lock before proceeding... "
 flock -n 100 || exit 1
 echo "OK"
 
+sudo chown -R ec2-user.ec2-user "$(dirname $PULLPREVIEW_ENV_FILE)"
 
-rm -f <%= remote_app_path %>/docker-compose.*
-tar xzf "$1" -C "<%= remote_app_path %>"
+rm -f $PULLPREVIEW_ENV_FILE
+echo 'PULLPREVIEW_PUBLIC_DNS=<%= locals.public_dns %>' >> $PULLPREVIEW_ENV_FILE
+echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
+echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
+
+set -o allexport
+source $PULLPREVIEW_ENV_FILE
+set +o allexport
+
+rm -f <%= locals.remote_app_path %>/docker-compose.*
+tar xzf "$1" -C "<%= locals.remote_app_path %>"
 
 pull() {
-  docker-compose <%= compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
+  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
 }
 
 # pulling images sometimes result in 'unexpected EOF', so retry at most 5 times
@@ -48,10 +59,10 @@ for i in {1..5}; do
   if pull; then break ; fi
 done
 
-docker-compose <%= compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
+docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
 	--build \
 	--remove-orphans \
 	-d
 
 sleep 10
-docker-compose logs --tail 1000
+docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> logs --tail 1000

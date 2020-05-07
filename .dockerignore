@@ -1,2 +1,7 @@
-examples/
-web/
+*.swp
+test/
+img/
+.dockerignore
+.git
+.github
+Makefile

@@ -1,4 +1,5 @@
 require "erb"
+require "ostruct"
 
 module PullPreview
   class Instance
@@ -75,7 +76,7 @@ module PullPreview
           "chmod +x /usr/local/bin/docker-compose",
           "usermod -aG docker ec2-user",
           "service docker start",
-          "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready",
+          "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
         ].join(" && "),
         tags: {stack: STACK_NAME}.merge(tags).map{|(k,v)| {key: k.to_s, value: v.to_s}},
       })
@@ -91,13 +92,14 @@ module PullPreview
     end
 
     def erb_locals
-      {
+      OpenStruct.new(
         remote_app_path: remote_app_path,
         compose_files: compose_files,
         public_ip: public_ip,
+        public_dns: public_dns,
         admins: admins,
         url: url,
-      }
+      )
     end
 
     def update_script
@@ -105,7 +107,7 @@ module PullPreview
     end
 
     def update_script_rendered
-      ERB.new(File.read(update_script)).result_with_hash(erb_locals)
+      ERB.new(File.read(update_script)).result_with_hash(locals: erb_locals)
     end
 
     def setup_update_script
@@ -127,7 +129,7 @@ module PullPreview
 
     def wait_until_running!
       if wait_until { logger.info "Waiting for instance to be running" ; running? }
-        logger.info "Instance is running public_ip=#{public_ip}"
+        logger.info "Instance is running public_ip=#{public_ip} public_dns=#{public_dns}"
       else
         logger.error "Timeout while waiting for instance running"
         raise Error, "Instance still not running. Aborting."
