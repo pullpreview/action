@@ -107,6 +107,8 @@ jobs:
         admins: crohr,other-github-user
         # A staging environment will always exist for the master branch
         always_on: master
+        # Use the cidrs option to restrict access to staging instance to specific IP ranges
+        cidrs: "0.0.0.0/0"
         # PullPreview will use those 2 files when running docker-compose up
         compose_files: docker-compose.yml,docker-compose.staging.yml
         # The preview URL will target this port
