@@ -18,7 +18,6 @@ module PullPreview
       end
 
       aws_region = PullPreview.lightsail.config.region
-      compose_files = opts[:compose_files]
       instance_name = opts[:name]
 
       PullPreview.logger.info "Taring up repository at #{app_path.inspect}..."
@@ -26,14 +25,7 @@ module PullPreview
         exit 1
       end
 
-      instance = Instance.new(
-        instance_name,
-        admins: opts[:admins],
-        ports: opts[:ports],
-        default_port: opts[:default_port],
-        compose_files: compose_files,
-        dns: opts[:dns],
-      )
+      instance = Instance.new(instance_name, opts)
 
       unless instance.running?
         PullPreview.logger.info "Starting instance name=#{instance.name}"

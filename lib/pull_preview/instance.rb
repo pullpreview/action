@@ -4,6 +4,7 @@ require "ostruct"
 module PullPreview
   class Instance
     attr_reader :admins
+    attr_reader :cidrs
     attr_reader :compose_files
     attr_reader :default_port
     attr_reader :dns
@@ -25,6 +26,7 @@ module PullPreview
     def initialize(name, opts = {})
       @name = self.class.normalize_name(name)
       @admins = opts[:admins] || []
+      @cidrs = opts[:cidrs] || ["0.0.0.0/0"]
       @default_port = opts[:default_port] || "80"
       # TODO: normalize
       @ports = (opts[:ports] || []).push(default_port).push("22").uniq.compact
@@ -166,10 +168,16 @@ module PullPreview
           protocol ||= "tcp"
           port_range_start, port_range_end = port_range.split("-", 2)
           port_range_end ||= port_range_start
+          cidrs_to_use = cidrs
+          if port_range_start.to_i == 22
+            # allow SSH from anywhere
+            cidrs_to_use = ["0.0.0.0/0"]
+          end
           {
             from_port: port_range_start.to_i,
             to_port: port_range_end.to_i,
             protocol: protocol, # accepts tcp, all, udp
+            cidrs: cidrs_to_use,
           }
         end,
         instance_name: name

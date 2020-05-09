@@ -26,6 +26,10 @@ inputs:
     description: 'Ports to open for external access on the preview server (port 22 is always open), comma-separated'
     required: false
     default: "80/tcp,443/tcp,1000-10000/tcp"
+  cidrs:
+    description: 'The IP address, or range of IP addresses in CIDR notation, that are allowed to connect to the instance'
+    required: false
+    default: '0.0.0.0/0'
   default_port:
     description: 'The port to use when building the preview URL'
     required: false
@@ -48,12 +52,14 @@ outputs:
 
 runs:
   using: 'docker'
-  image: docker://pullpreview/pullpreview:v3
+  image: docker://pullpreview/pullpreview:v4
   args:
     - "github-sync"
     - "${{ inputs.app_path }}"
     - "--admins"
     - "${{ inputs.admins }}"
+    - "--cidrs"
+    - "${{ inputs.cidrs }}"
     - "--compose-files"
     - "${{ inputs.compose_files }}"
     - "--dns"
