@@ -8,6 +8,7 @@ require_relative "./pull_preview/up"
 require_relative "./pull_preview/down"
 require_relative "./pull_preview/sync_with_github"
 require_relative "./pull_preview/list"
+require_relative "./pull_preview/license_create"
 
 module PullPreview
   VERSION = "1.0.0"
