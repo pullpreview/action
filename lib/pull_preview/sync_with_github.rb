@@ -1,4 +1,6 @@
 require "octokit"
+require "net/http"
+require 'digest'
 
 module PullPreview
   class SyncWithGithub
@@ -9,6 +11,7 @@ module PullPreview
     attr_reader :always_on
 
     LABEL = "pullpreview"
+    LICENCE_URI = URI.parse("https://pullpreview.com/check-licence")
 
     def self.run(app_path, opts)
       github_event_path = ENV.fetch("GITHUB_EVENT_PATH")
@@ -44,6 +47,9 @@ module PullPreview
         PullPreview.logger.info "A newer commit is present. Skipping current run."
         return true
       end
+      licence_key = ENV.fetch("PULLPREVIEW_TEST",
+        [org_id, repo_id].map{|x| Digest::SHA256.hexdigest(x)}.join('/')
+      )
 
       case guess_action_from_event
       when :pr_down, :branch_down
@@ -52,6 +58,7 @@ module PullPreview
           PullPreview.logger.info "Ignoring event"
           return true
         end
+        check_licence(licence_key)
         update_github_status(:destroying)
         Down.run(name: instance_name)
         if pr_closed?
@@ -60,6 +67,7 @@ module PullPreview
         end
         update_github_status(:destroyed)
       when :pr_up, :pr_push, :branch_push
+        check_licence(licence_key)
         update_github_status(:deploying)
         tags = default_instance_tags.push(*opts[:tags]).uniq
         instance = Up.run(
@@ -160,6 +168,15 @@ module PullPreview
           self.class.clear_deployments_for(repo, instance_name)
         end
       end
+    end
+
+    def check_licence(key)
+      LICENCE_URI.query = URI.encode_www_form({key: key})
+      #TODO timeout? https://opensourceconnections.com/blog/2008/04/24/adding-timeout-to-nethttp-get_response/
+      response = Net::HTTP.get_response(LICENCE_URI)
+      #TODO something with the response ;)
+    rescue => e
+      PullPreview.logger.warn "Unable to check licence: #{e.message}"
     end
 
     def org_name
