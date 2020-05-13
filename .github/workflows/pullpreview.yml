@@ -12,11 +12,9 @@ jobs:
     - uses: actions/checkout@v2
     - uses: .
       with:
-        always_on:
-          - master
+        admins: crohr,qbonnard
+        always_on: master
         app_path: https://github.com/pullpreview/demo-wordpress
-        admins: crohr
       env:
         AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
         AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-        PULLPREVIEW_LOGGER_LEVEL: DEBUG
