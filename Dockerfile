@@ -1,7 +1,6 @@
-FROM ruby:2-alpine
+FROM ruby:2.7-alpine
 
 RUN apk --no-cache add git openssh-client less
-RUN gem install bundler
 WORKDIR /app
 COPY Gemfile .
 COPY Gemfile.lock .

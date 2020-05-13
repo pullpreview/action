@@ -52,7 +52,7 @@ outputs:
 
 runs:
   using: 'docker'
-  image: docker://pullpreview/pullpreview:v3
+  image: 'Dockerfile'
   args:
     - "github-sync"
     - "${{ inputs.app_path }}"
