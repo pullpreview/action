@@ -19,8 +19,18 @@ module PullPreview
       self.new(github_context, app_path, opts).sync!
     end
 
-    def self.clear_deployments_for(repo, environment)
+    def self.clear_deployments_for(repo, environment, force: false)
       deploys = PullPreview.octokit.list_deployments(repo, environment: environment, per_page: 100)
+      if force
+        # make sure all deploys are marked as inactive first
+        deploys.each do |deployment|
+          PullPreview.octokit.create_deployment_status(
+            deployment.url,
+            "inactive",
+            headers: { accept: "application/vnd.github.ant-man-preview+json" }
+          )
+        end
+      end
       deploys.each do |deployment|
         PullPreview.octokit.delete(deployment.url)
       end

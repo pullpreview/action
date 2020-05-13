@@ -17,6 +17,7 @@ module PullPreview
       table = Terminal::Table.new(headings: [
         "Name",
         "IP",
+        "Type",
         "Region",
         "AZ",
         "Created on",
@@ -25,8 +26,8 @@ module PullPreview
       tags_to_find = {
         "stack" => STACK_NAME,
       }
-      tags_to_find.merge!("repo" => opts[:repo]) if opts[:repo]
-      tags_to_find.merge!("org" => opts[:org]) if opts[:org]
+      tags_to_find.merge!("repo_name" => opts[:repo]) if opts[:repo]
+      tags_to_find.merge!("org_name" => opts[:org]) if opts[:org]
 
       begin
         result = PullPreview.lightsail.get_instances(next_page_token: next_page_token) 
@@ -37,6 +38,7 @@ module PullPreview
             table << [
               instance.name,
               instance.public_ip_address,
+              instance.bundle_id,
               instance.location.region_name,
               instance.location.availability_zone,
               instance.created_at.iso8601,
