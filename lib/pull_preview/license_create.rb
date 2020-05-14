@@ -37,7 +37,8 @@ module PullPreview
       end
 
       # In the license generation application, load the private key from a file.
-      private_key = OpenSSL::PKey::RSA.new File.read("license_key")
+      private_key_data = PullPreview.root_dir.join("license_key").read
+      private_key = OpenSSL::PKey::RSA.new private_key_data
       PullPreview::License.encryption_key = private_key
 
       # Build a new license.

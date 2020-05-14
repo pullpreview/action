@@ -21,7 +21,11 @@ module PullPreview
   end
 
   def self.data_dir
-    Pathname.new(__dir__).parent.join("data")
+    root_dir.join("data")
+  end
+
+  def self.root_dir
+    Pathname.new(__dir__).parent
   end
 
   def self.octokit
