@@ -18,11 +18,6 @@ module PullPreview
         opts[:expires_at] = Date.today + opts[:expires_in]
       end
 
-      # In the license generation application, load the private key from a file.
-      private_key_data = PullPreview.root_dir.join("license_key").read
-      private_key = OpenSSL::PKey::RSA.new private_key_data
-      PullPreview::License.encryption_key = private_key
-
       # Build a new license.
       license = PullPreview::License.new(opts.to_hash)
 

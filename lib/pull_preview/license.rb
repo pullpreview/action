@@ -51,9 +51,24 @@ module PullPreview
         @encryptor ||= Encryptor.new(self.encryption_key)
       end
 
-      def import(data)
+      def load_key!(key_type)
+        return if key_type == :private && @encryption_key&.private?
+        return if key_type == :public  && @encryption_key&.public?
+        # Note: public? is always true with RSA
+
+        filename = "license_key"
+        filename += ".pub" if key_type == :public
+
+        key_data = PullPreview.root_dir.join(filename).read
+        PullPreview::License.encryption_key = OpenSSL::PKey::RSA.new key_data
+      end
+
+      def import!
+        load_key! :public
+
+        data = ENV.fetch("PULLPREVIEW_LICENSE", nil)
         if data.nil?
-          raise ImportError, "No license data."
+          PullPreview.logger.error "Missing PULLPREVIEW_LICENSE environment variable."
         end
 
         data = Boundary.remove_boundary(data)
@@ -61,16 +76,31 @@ module PullPreview
         begin
           license_json = encryptor.decrypt(data)
         rescue Encryptor::Error
-          raise ImportError, "License data could not be decrypted."
+          PullPreview.logger.error "License data could not be decrypted."
         end
 
         begin
           attributes = JSON.parse(license_json)
         rescue JSON::ParseError
-          raise ImportError, "License data is invalid JSON."
+          PullPreview.logger.error "License data is invalid JSON."
         end
+
+        license = new(attributes)
         
-        new(attributes)
+        PullPreview.logger.info "Imported license:"
+        PullPreview.logger.info license
+
+        license
+      end
+
+      def check!(command)
+        case command
+        when "github-sync"
+          if import!()&.expired?
+            PullPreview.logger.error "License expired"
+            exit 1
+          end
+        end
       end
     end
 
@@ -117,6 +147,8 @@ module PullPreview
 
     def export(boundary: nil)
       validate!
+
+      self.class.load_key! :private
 
       data = self.class.encryptor.encrypt(self.to_json)
 

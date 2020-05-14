@@ -13,23 +13,9 @@ PullPreview.logger = Logger.new(STDOUT)
 PullPreview.logger.level = Logger.const_get(ENV.fetch("PULLPREVIEW_LOGGER_LEVEL", "INFO"))
 PullPreview.lightsail = Aws::Lightsail::Client.new(region: ENV.fetch("AWS_REGION", "us-east-1"))
 
-public_key = OpenSSL::PKey::RSA.new File.read("license_key.pub")
-PullPreview::License.encryption_key = public_key
-begin
-  license = PullPreview::License.import(ENV.fetch("PULLPREVIEW_LICENSE"))
-rescue KeyError => e
-  PullPreview.logger.error "Missing PULLPREVIEW_LICENSE environment variable."
-  #exit 1
-rescue PullPreview::License::ImportError => e
-  PullPreview.logger.error "Unable to import license: #{e.message}"
-  #exit 1
-end
-PullPreview.logger.info "Imported license:"
-PullPreview.logger.info license
-if license&.expired?
-  PullPreview.logger.error "License expired"
-  #exit 1
-end
+command = ARGV.shift
+
+PullPreview::License.check!(command)
 
 common_opts = lambda do |o|
   o.bool '-v', '--verbose', 'Enable verbose mode' do
@@ -55,7 +41,7 @@ up_opts = lambda do |o|
 end
 
 begin
-  case ARGV.shift
+  case command
   when "down"
     opts = Slop.parse do |o|
       o.banner = "Usage: pullpreview down [options]"
