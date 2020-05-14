@@ -13,10 +13,6 @@ PullPreview.logger = Logger.new(STDOUT)
 PullPreview.logger.level = Logger.const_get(ENV.fetch("PULLPREVIEW_LOGGER_LEVEL", "INFO"))
 PullPreview.lightsail = Aws::Lightsail::Client.new(region: ENV.fetch("AWS_REGION", "us-east-1"))
 
-command = ARGV.shift
-
-PullPreview::License.check!(command)
-
 common_opts = lambda do |o|
   o.bool '-v', '--verbose', 'Enable verbose mode' do
     PullPreview.logger.level = Logger::DEBUG
@@ -41,7 +37,7 @@ up_opts = lambda do |o|
 end
 
 begin
-  case command
+  case ARGV.shift
   when "down"
     opts = Slop.parse do |o|
       o.banner = "Usage: pullpreview down [options]"
