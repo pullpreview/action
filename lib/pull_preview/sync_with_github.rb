@@ -11,7 +11,7 @@ module PullPreview
     LABEL = "pullpreview"
 
     def self.run(app_path, opts)
-      PullPreview::License.check!("github_sync")
+      PullPreview::License.check!("github-sync")
       github_event_path = ENV.fetch("GITHUB_EVENT_PATH")
       # https://developer.github.com/v3/activity/events/types/#pushevent
       # https://help.github.com/en/actions/reference/events-that-trigger-workflows
