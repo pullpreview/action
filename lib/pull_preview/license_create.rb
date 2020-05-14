@@ -13,27 +13,9 @@ end
 
 module PullPreview
   class LicenseCreate
-    def self.run(cli_args)
-      opts = Slop.parse do |o|
-        o.banner = "Usage: pullpreview license-create [options]"
-        o.string "--output-file", "output file"
-        o.string "--type",       "license type [trial]", required: true
-        o.date   "--expires-at", "expiration date"
-        o.int    "--expires-in", "expiration days from today"
-        o.on "--help" do
-          puts command
-          puts
-          puts "To generate a private key, use:"
-          puts "openssl openssl genrsa 2048 -out license_key"
-          puts
-          puts "To generate the matching public key, use:"
-          puts "openssl rsa -in license_key -pubout -out license_key.pub"
-          exit
-        end
-      end
-
-      if opts["expires_in"]
-        opts["expires_at"] = Date.today + opts["expires_in"]
+    def self.run(opts)
+      if opts[:expires_in]
+        opts[:expires_at] = Date.today + opts[:expires_in]
       end
 
       # In the license generation application, load the private key from a file.

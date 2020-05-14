@@ -2,17 +2,7 @@ require 'terminal-table'
 
 module PullPreview
   class List
-    def self.run(cli_args)
-      opts = Slop.parse do |o|
-        o.banner = "Usage: pullpreview list [options]"
-        o.string '--org', 'Restrict to given organization name'
-        o.string '--repo', 'Restrict to given repository name'
-        o.on '--help' do
-          puts o
-          exit
-        end
-      end
-
+    def self.run(opts)
       next_page_token = nil
       table = Terminal::Table.new(headings: [
         "Name",
