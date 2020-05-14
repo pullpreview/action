@@ -68,7 +68,7 @@ module PullPreview
 
         data = ENV.fetch("PULLPREVIEW_LICENSE", nil)
         if data.nil?
-          PullPreview.logger.error "Missing PULLPREVIEW_LICENSE environment variable."
+          raise ImportError, "Missing PULLPREVIEW_LICENSE environment variable."
         end
 
         data = Boundary.remove_boundary(data)
@@ -76,13 +76,13 @@ module PullPreview
         begin
           license_json = encryptor.decrypt(data)
         rescue Encryptor::Error
-          PullPreview.logger.error "License data could not be decrypted."
+          raise ImportError, "License data could not be decrypted."
         end
 
         begin
           attributes = JSON.parse(license_json)
         rescue JSON::ParseError
-          PullPreview.logger.error "License data is invalid JSON."
+          raise ImportError, "License data is invalid JSON."
         end
 
         license = new(attributes)
@@ -96,10 +96,7 @@ module PullPreview
       def check!(command)
         case command
         when "github-sync"
-          if import!()&.expired?
-            PullPreview.logger.error "License expired"
-            exit 1
-          end
+          raise ValidationError, "License is expired" if import!()&.expired?
         end
       end
     end

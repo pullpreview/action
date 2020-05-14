@@ -121,4 +121,10 @@ rescue Aws::Lightsail::Errors::ServiceError => e
   puts "AWS Error: #{e.message}"
   PullPreview.logger.debug e.backtrace.join("\n")
   exit 1
+rescue PullPreview::License::ImportError => e
+  puts "Unable to import license: #{e.message}"
+  exit 1
+rescue PullPreview::License::ValidationError => e
+  puts "Invalid license: #{e.message}"
+  exit 1
 end
