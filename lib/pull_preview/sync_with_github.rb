@@ -55,7 +55,10 @@ module PullPreview
         return true
       end
 
-      case guess_action_from_event
+      gh_action = guess_action_from_event
+      PullPreview.check_license!(org_id: org_id, repo_id: repo_id, action: gh_action)
+
+      case gh_action
       when :pr_down, :branch_down
         instance = Instance.new(instance_name)
         unless instance.running?
