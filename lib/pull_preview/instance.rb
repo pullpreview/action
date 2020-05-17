@@ -64,7 +64,7 @@ module PullPreview
     def launch(az, bundle_id, blueprint_id, tags = {})
       logger.debug "Instance launching ssh_public_keys=#{ssh_public_keys.inspect}"
 
-      client.create_instances({
+      params = {
         instance_names: [name],
         availability_zone: az,
         blueprint_id: blueprint_id,
@@ -86,7 +86,20 @@ module PullPreview
           "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
         ].join(" && "),
         tags: {stack: STACK_NAME}.merge(tags).map{|(k,v)| {key: k.to_s, value: v.to_s}},
-      })
+      }
+
+      if latest_snapshot
+        logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
+        client.create_instances_from_snapshot(params.merge(instance_snapshot_name: latest_snapshot.name))
+      else
+        client.create_instances(params)
+      end
+    end
+
+    def latest_snapshot
+      @latest_snapshot ||= client.get_instance_snapshots.instance_snapshots.sort{|a,b| b.created_at <=> a.created_at}.find do |snap|
+        snap.state == "available" && snap.from_instance_name == name
+      end
     end
 
     def destroy!
