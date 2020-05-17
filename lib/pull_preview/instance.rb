@@ -69,22 +69,6 @@ module PullPreview
         availability_zone: az,
         blueprint_id: blueprint_id,
         bundle_id: bundle_id,
-        user_data: [
-          %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys},
-          "mkdir -p #{REMOTE_APP_PATH} && chown -R ec2-user.ec2-user #{REMOTE_APP_PATH}",
-          "echo 'cd #{REMOTE_APP_PATH}' > /etc/profile.d/pullpreview.sh",
-          "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile",
-          "echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab",
-          "sysctl vm.swappiness=10 && sysctl vm.vfs_cache_pressure=50",
-          "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf",
-          "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf",
-          "yum install -y docker",
-          %{curl -L "https://github.com/docker/compose/releases/download/1.25.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
-          "chmod +x /usr/local/bin/docker-compose",
-          "usermod -aG docker ec2-user",
-          "service docker start",
-          "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
-        ].join(" && "),
         tags: {stack: STACK_NAME}.merge(tags).map{|(k,v)| {key: k.to_s, value: v.to_s}},
       }
 
@@ -92,7 +76,25 @@ module PullPreview
         logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
         client.create_instances_from_snapshot(params.merge(instance_snapshot_name: latest_snapshot.name))
       else
-        client.create_instances(params)
+        client.create_instances(params.merge({
+          user_data: [
+            %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys},
+            "mkdir -p #{REMOTE_APP_PATH} && chown -R ec2-user.ec2-user #{REMOTE_APP_PATH}",
+            "echo 'cd #{REMOTE_APP_PATH}' > /etc/profile.d/pullpreview.sh",
+            "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile",
+            "echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab",
+            "sysctl vm.swappiness=10 && sysctl vm.vfs_cache_pressure=50",
+            "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf",
+            "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf",
+            "yum install -y docker",
+            %{curl -L "https://github.com/docker/compose/releases/download/1.25.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
+            "chmod +x /usr/local/bin/docker-compose",
+            "usermod -aG docker ec2-user",
+            "service docker start",
+            "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
+          ].join(" && "),
+          blueprint_id: blueprint_id
+        }))
       end
     end
 
