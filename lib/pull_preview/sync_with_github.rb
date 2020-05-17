@@ -55,7 +55,11 @@ module PullPreview
         return true
       end
 
-      case guess_action_from_event
+      pp_action = guess_action_from_event
+      license = PullPreview::License.new(org_id, repo_id, pp_action).fetch!
+      PullPreview.logger.info license.message
+
+      case pp_action
       when :pr_down, :branch_down
         instance = Instance.new(instance_name)
         unless instance.running?
@@ -70,6 +74,9 @@ module PullPreview
         end
         update_github_status(:destroyed)
       when :pr_up, :pr_push, :branch_push
+        unless license.ok?
+          raise LicenseError, license.message
+        end
         update_github_status(:deploying)
         tags = default_instance_tags.push(*opts[:tags]).uniq
         instance = Up.run(

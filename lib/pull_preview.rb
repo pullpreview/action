@@ -8,11 +8,13 @@ require_relative "./pull_preview/up"
 require_relative "./pull_preview/down"
 require_relative "./pull_preview/sync_with_github"
 require_relative "./pull_preview/list"
+require_relative "./pull_preview/license"
 
 module PullPreview
   VERSION = "1.0.0"
   REMOTE_APP_PATH = "/app"
   STACK_NAME = "pullpreview"
+  LICENSE_STATUS_URL = "https://api.pullpreview.com/licenses/status"
 
   class << self
     attr_accessor :logger
@@ -26,6 +28,13 @@ module PullPreview
   def self.octokit
     @octokit ||= Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN")).tap do |client|
       client.auto_paginate = false
+    end
+  end
+
+  def self.faraday
+    @faraday ||= Faraday.new(request: { timeout: 10, open_timeout: 5 }) do |conn|
+      conn.request(:retry, max: 2)
+      conn.request  :url_encoded
     end
   end
 end

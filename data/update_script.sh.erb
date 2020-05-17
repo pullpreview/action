@@ -15,10 +15,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [ -f "$lock_file" ]; then
-  echo "Previous operation in progress. Waiting for at most 30min before proceeding..."
+  echo "Previous operation in progress. Waiting for at most 20min before proceeding..."
 
-  for i in {1..1800}; do
-    sleep 1
+  for i in {1..1200}; do
+    sleep 5
     if [ ! -f "$lock_file" ]; then
       break
     fi

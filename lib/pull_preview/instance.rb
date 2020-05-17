@@ -64,29 +64,50 @@ module PullPreview
     def launch(az, bundle_id, blueprint_id, tags = {})
       logger.debug "Instance launching ssh_public_keys=#{ssh_public_keys.inspect}"
 
-      client.create_instances({
+      params = {
         instance_names: [name],
         availability_zone: az,
-        blueprint_id: blueprint_id,
         bundle_id: bundle_id,
-        user_data: [
-          %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys},
-          "mkdir -p #{REMOTE_APP_PATH} && chown -R ec2-user.ec2-user #{REMOTE_APP_PATH}",
-          "echo 'cd #{REMOTE_APP_PATH}' > /etc/profile.d/pullpreview.sh",
-          "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile",
-          "echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab",
-          "sysctl vm.swappiness=10 && sysctl vm.vfs_cache_pressure=50",
-          "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf",
-          "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf",
-          "yum install -y docker",
-          %{curl -L "https://github.com/docker/compose/releases/download/1.25.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
-          "chmod +x /usr/local/bin/docker-compose",
-          "usermod -aG docker ec2-user",
-          "service docker start",
-          "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
-        ].join(" && "),
         tags: {stack: STACK_NAME}.merge(tags).map{|(k,v)| {key: k.to_s, value: v.to_s}},
-      })
+      }
+
+      if latest_snapshot
+        logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
+        logger.info "Creating new instance name=#{name}..."
+        client.create_instances_from_snapshot(params.merge({
+          user_data: [
+            "service docker restart"
+          ].join(" && "),
+          instance_snapshot_name: latest_snapshot.name,
+        }))
+      else
+        logger.info "Creating new instance name=#{name}..."
+        client.create_instances(params.merge({
+          user_data: [
+            %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys},
+            "mkdir -p #{REMOTE_APP_PATH} && chown -R ec2-user.ec2-user #{REMOTE_APP_PATH}",
+            "echo 'cd #{REMOTE_APP_PATH}' > /etc/profile.d/pullpreview.sh",
+            "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile",
+            "echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab",
+            "sysctl vm.swappiness=10 && sysctl vm.vfs_cache_pressure=50",
+            "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf",
+            "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf",
+            "yum install -y docker",
+            %{curl -L "https://github.com/docker/compose/releases/download/1.25.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
+            "chmod +x /usr/local/bin/docker-compose",
+            "usermod -aG docker ec2-user",
+            "service docker start",
+            "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
+          ].join(" && "),
+          blueprint_id: blueprint_id
+        }))
+      end
+    end
+
+    def latest_snapshot
+      @latest_snapshot ||= client.get_instance_snapshots.instance_snapshots.sort{|a,b| b.created_at <=> a.created_at}.find do |snap|
+        snap.state == "available" && snap.from_instance_name == name
+      end
     end
 
     def destroy!
