@@ -73,7 +73,12 @@ module PullPreview
 
       if latest_snapshot
         logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
-        client.create_instances_from_snapshot(params.merge(instance_snapshot_name: latest_snapshot.name))
+        client.create_instances_from_snapshot(params.merge({
+          user_data: [
+            "service docker restart"
+          ].join(" && "),
+          instance_snapshot_name: latest_snapshot.name,
+        }))
       else
         client.create_instances(params.merge({
           user_data: [
