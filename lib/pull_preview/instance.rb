@@ -67,7 +67,6 @@ module PullPreview
       params = {
         instance_names: [name],
         availability_zone: az,
-        blueprint_id: blueprint_id,
         bundle_id: bundle_id,
         tags: {stack: STACK_NAME}.merge(tags).map{|(k,v)| {key: k.to_s, value: v.to_s}},
       }
