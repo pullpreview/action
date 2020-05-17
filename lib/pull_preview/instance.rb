@@ -73,6 +73,7 @@ module PullPreview
 
       if latest_snapshot
         logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
+        logger.info "Creating new instance name=#{name}..."
         client.create_instances_from_snapshot(params.merge({
           user_data: [
             "service docker restart"
@@ -80,6 +81,7 @@ module PullPreview
           instance_snapshot_name: latest_snapshot.name,
         }))
       else
+        logger.info "Creating new instance name=#{name}..."
         client.create_instances(params.merge({
           user_data: [
             %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys},
