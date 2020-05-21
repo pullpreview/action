@@ -179,8 +179,16 @@ module PullPreview
       end
     end
 
+    def organization?
+      github_context.has_key?("organization")
+    end
+
     def org_name
-      github_context["organization"]["login"]
+      if organization?
+        github_context["organization"]["login"]
+      else
+        github_context["repository"]["owner"]["login"]
+      end
     end
 
     def repo_name
@@ -196,7 +204,11 @@ module PullPreview
     end
 
     def org_id
-      github_context["organization"]["id"]
+      if organization?
+        github_context["organization"]["id"]
+      else
+        github_context["repository"]["owner"]["id"]
+      end
     end
 
     def ref
