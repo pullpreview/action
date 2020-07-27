@@ -97,6 +97,7 @@ module PullPreview
             "chmod +x /usr/local/bin/docker-compose",
             "usermod -aG docker ec2-user",
             "service docker start",
+            "echo 'docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune",
             "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
           ].join(" && "),
           blueprint_id: blueprint_id

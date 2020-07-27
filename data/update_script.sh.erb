@@ -4,6 +4,7 @@ set -e
 set -o pipefail
 
 APP_TARBALL="$1"
+APP_PATH="<%= locals.remote_app_path %>"
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
 
 lock_file="/tmp/update.lock"
@@ -47,8 +48,14 @@ set -o allexport
 source $PULLPREVIEW_ENV_FILE
 set +o allexport
 
-rm -f <%= locals.remote_app_path %>/docker-compose.*
-tar xzf "$1" -C "<%= locals.remote_app_path %>"
+cd /
+
+sudo rm -rf "$APP_PATH"
+sudo mkdir -p "$APP_PATH"
+sudo chown -R ec2-user.ec2-user "$APP_PATH"
+tar xzf "$1" -C "$APP_PATH"
+
+cd "$APP_PATH"
 
 pull() {
   docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
