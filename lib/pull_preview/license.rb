@@ -19,21 +19,8 @@ module PullPreview
     end
 
     def fetch!
-      response = PullPreview.faraday.get(LICENSE_STATUS_URL, params)
-      if response.status.to_s == "200"
-        payload = JSON.parse(response.body)
-        @state = payload["state"]
-        @message = payload["message"].to_s
-      else
-        @state = "error"
-        @message = "Error while fetching the license status"
-      end
-      self
-    rescue Faraday::Error => e
-      logger.warn "Got the following error while fetching the license: #{e.message}"
-      self
-    rescue StandardError => e
-      logger.warn "Got the following error while checking the license: #{e.message}"
+      @state = "ok"
+      @message = "License valid"
       self
     end
   end

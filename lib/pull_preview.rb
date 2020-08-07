@@ -14,7 +14,6 @@ module PullPreview
   VERSION = "1.0.0"
   REMOTE_APP_PATH = "/app"
   STACK_NAME = "pullpreview"
-  LICENSE_STATUS_URL = "https://api.pullpreview.com/licenses/status"
 
   class << self
     attr_accessor :logger
