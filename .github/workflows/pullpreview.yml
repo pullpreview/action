@@ -1,4 +1,4 @@
-name: PullPreview
+name: pullpreview
 on:
   push:
     branches:
@@ -8,7 +8,6 @@ on:
 
 jobs:
   deploy:
-    name: Deploy
     runs-on: ubuntu-latest
     if: github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     steps:
