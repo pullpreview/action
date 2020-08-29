@@ -10,7 +10,7 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    if: github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     steps:
     - uses: actions/checkout@v2
     - uses: "./"
