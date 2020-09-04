@@ -112,7 +112,7 @@ module PullPreview
         return :pr_up
       end
 
-      if push?
+      if push? || pr_synchronize?
         if pr_has_label?(LABEL)
           action = :pr_push
         else
@@ -263,6 +263,11 @@ module PullPreview
 
     def push?
       !pull_request?
+    end
+
+    def pr_synchronize?
+      pull_request? &&
+        github_context["action"] == "synchronize"
     end
 
     def pr_closed?
