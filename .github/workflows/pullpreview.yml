@@ -10,6 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     if: github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v2
     - uses: "./"
