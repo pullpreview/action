@@ -50,7 +50,7 @@ module PullPreview
           end
         end.bundle_id
 
-        instance.launch(azs.sample, bundle_id, blueprint_id, tags)
+        instance.launch(azs.first, bundle_id, blueprint_id, tags)
         instance.wait_until_running!
         sleep 2
       end
