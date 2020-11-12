@@ -39,10 +39,17 @@ echo "OK"
 
 sudo chown -R ec2-user.ec2-user "$(dirname $PULLPREVIEW_ENV_FILE)"
 
-rm -f $PULLPREVIEW_ENV_FILE
+if [ -f "$PULLPREVIEW_ENV_FILE" ]; then
+  PULLPREVIEW_FIRST_RUN=false
+  rm -f "$PULLPREVIEW_ENV_FILE"
+else
+  PULLPREVIEW_FIRST_RUN=true
+fi
+
 echo 'PULLPREVIEW_PUBLIC_DNS=<%= locals.public_dns %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
+echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
 
 set -o allexport
 source $PULLPREVIEW_ENV_FILE
