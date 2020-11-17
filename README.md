@@ -92,7 +92,7 @@ name: PullPreview
 on:
   push:
     branches:
-      - dev
+      - main
   pull_request:
     types: [labeled, unlabeled, synchronize, closed, reopened]
 
@@ -108,7 +108,7 @@ jobs:
         # Those GitHub users will have SSH access to the servers
         admins: crohr,other-github-user
         # A staging environment will always exist for the master branch
-        always_on: master
+        always_on: main
         # Use the cidrs option to restrict access to the live environments to specific IP ranges
         cidrs: "0.0.0.0/0"
         # PullPreview will use those 2 files when running docker-compose up
