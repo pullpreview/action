@@ -91,17 +91,19 @@ Workflow file with the `master` branch always on:
 name: PullPreview
 on:
   push:
+    branches:
+      - dev
   pull_request:
-    types: [labeled, unlabeled, closed]
+    types: [labeled, unlabeled, synchronize, closed, reopened]
 
 jobs:
   deploy:
-    name: Deploy
+    if: github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
     - uses: actions/checkout@v2
-    - uses: pullpreview/action@v3
+    - uses: pullpreview/action@v4
       with:
         # Those GitHub users will have SSH access to the servers
         admins: crohr,other-github-user
@@ -110,7 +112,7 @@ jobs:
         # Use the cidrs option to restrict access to the live environments to specific IP ranges
         cidrs: "0.0.0.0/0"
         # PullPreview will use those 2 files when running docker-compose up
-        compose_files: docker-compose.yml,docker-compose.staging.yml
+        compose_files: docker-compose.yml,docker-compose.pullpreview.yml
         # The preview URL will target this port
         default_port: 80
         # Use a 512MB RAM instance type instead of the default 2GB
