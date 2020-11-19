@@ -9,6 +9,7 @@ module PullPreview
     attr_reader :default_port
     attr_reader :dns
     attr_reader :name
+    attr_reader :subdomain
     attr_reader :ports
 
     class << self
@@ -25,6 +26,7 @@ module PullPreview
 
     def initialize(name, opts = {})
       @name = self.class.normalize_name(name)
+      @subdomain = opts[:subdomain] || name
       @admins = opts[:admins] || []
       @cidrs = opts[:cidrs] || ["0.0.0.0/0"]
       @default_port = opts[:default_port] || "80"
@@ -243,7 +245,7 @@ module PullPreview
 
     def public_dns
       [
-        [public_ip.gsub(".", "-"), name].join("-"),
+        [public_ip.gsub(".", "-"), subdomain].join("-"),
         dns
       ].join(".")
     end
