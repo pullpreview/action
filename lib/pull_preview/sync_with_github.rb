@@ -331,8 +331,9 @@ module PullPreview
 
     def instance_subdomain
       @instance_subdomain ||= begin
-        components = [branch]
+        components = []
         components.push(*["pr", pr_number]) if pr_number
+        components.push(branch)
         Instance.normalize_name(components.join("-"))
       end
     end
