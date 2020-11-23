@@ -330,7 +330,11 @@ module PullPreview
     end
 
     def instance_subdomain
-      Instance.normalize_name(["gh", repo_id, "branch", branch].join("-"))
+      @instance_subdomain ||= begin
+        components = [branch]
+        components.push(*["pr", pr_number]) if pr_number
+        Instance.normalize_name(components.join("-"))
+      end
     end
 
     def default_instance_tags
