@@ -339,13 +339,17 @@ module PullPreview
     end
 
     def default_instance_tags
-      [
+      tags = [
         ["repo_name", repo_name],
         ["repo_id", repo_id],
         ["org_name", org_name],
         ["org_id", org_id],
         ["version", PullPreview::VERSION],
-      ].map{|tag| tag.join(":")}
+      ]
+      if pr_number
+        tags << ["pr_number", pr_number]
+      end
+      tags.map{|tag| tag.join(":")}
     end
   end
 end
