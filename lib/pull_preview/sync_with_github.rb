@@ -81,7 +81,7 @@ module PullPreview
         tags = default_instance_tags.push(*opts[:tags]).uniq
         instance = Up.run(
           app_path,
-          opts.merge(name: instance_name, tags: tags)
+          opts.merge(name: instance_name, subdomain: instance_subdomain, tags: tags)
         )
         update_github_status(:deployed, instance.url)
       else
@@ -326,6 +326,15 @@ module PullPreview
           ["gh", repo_id, "branch", branch].join("-")
         end
         Instance.normalize_name(name)
+      end
+    end
+
+    def instance_subdomain
+      @instance_subdomain ||= begin
+        components = []
+        components.push(*["pr", pr_number]) if pr_number
+        components.push(branch)
+        Instance.normalize_name(components.join("-"))
       end
     end
 
