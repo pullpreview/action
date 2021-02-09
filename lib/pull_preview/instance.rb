@@ -245,7 +245,7 @@ module PullPreview
 
     def public_dns
       [
-        [subdomain, public_ip.gsub(".", "-")].join("-"),
+        [subdomain, "ip", public_ip.gsub(".", "-")].join("-"),
         dns
       ].join(".")
     end
