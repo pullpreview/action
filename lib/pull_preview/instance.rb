@@ -244,8 +244,10 @@ module PullPreview
     end
 
     def public_dns
+      # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
+      remaining_chars_for_subdomain = 62 - dns.size - public_ip.size - "ip".size - ("." * 3).size
       [
-        [subdomain, "ip", public_ip.gsub(".", "-")].join("-"),
+        [subdomain[0..remaining_chars_for_subdomain], "ip", public_ip.gsub(".", "-")].join("-"),
         dns
       ].join(".")
     end
