@@ -212,7 +212,7 @@ module PullPreview
     end
 
     def ref
-      github_context["ref"]
+      github_context["ref"] || ENV.fetch("GITHUB_REF")
     end
 
     def latest_sha
@@ -227,7 +227,7 @@ module PullPreview
       if pull_request?
         github_context["pull_request"]["head"]["sha"]
       else
-        github_context["head_commit"]["id"]
+        github_context.dig("head_commit", "id") || ENV.fetch("GITHUB_SHA")
       end
     end
 
@@ -235,7 +235,7 @@ module PullPreview
       if pull_request?
         github_context["pull_request"]["head"]["ref"]
       else
-        github_context["ref"].sub("refs/heads/", "")
+        ref.sub("refs/heads/", "")
       end
     end
 
