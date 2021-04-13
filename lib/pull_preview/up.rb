@@ -60,6 +60,7 @@ module PullPreview
       instance.wait_until_ssh_ready!
       instance.setup_ssh_access
       instance.setup_update_script
+      instance.setup_prepost_scripts
 
       puts
       puts "To connect to the instance (authorized GitHub users: #{instance.admins.join(", ")}):"
@@ -73,6 +74,7 @@ module PullPreview
         raise Error, "Unable to copy application content on instance. Aborting."
       end
 
+      PullPreview.logger.info "Launching application..."
       ok = instance.ssh("/tmp/update_script.sh #{remote_tarball_path}")
 
       puts "::set-output name=url::#{instance.url}"

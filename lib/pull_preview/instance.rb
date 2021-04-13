@@ -11,6 +11,7 @@ module PullPreview
     attr_reader :name
     attr_reader :subdomain
     attr_reader :ports
+    attr_reader :registries
 
     class << self
       attr_accessor :client
@@ -33,6 +34,7 @@ module PullPreview
       # TODO: normalize
       @ports = (opts[:ports] || []).push(default_port).push("22").uniq.compact
       @compose_files = opts[:compose_files] || ["docker-compose.yml"]
+      @registries = opts[:registries] || []
       @dns = opts[:dns]
       @ssh_results = []
     end
@@ -133,12 +135,27 @@ module PullPreview
       )
     end
 
+    def github_token
+      ENV.fetch("GITHUB_TOKEN", "")
+    end
+
+    def github_repository_owner
+      ENV.fetch("GITHUB_REPOSITORY_OWNER", "")
+    end
+
     def update_script
       PullPreview.data_dir.join("update_script.sh.erb")
     end
 
     def update_script_rendered
       ERB.new(File.read(update_script)).result_with_hash(locals: erb_locals)
+    end
+
+    def setup_ssh_access
+      File.open("/tmp/authorized_keys", "w+") do |f|
+        f.write ssh_public_keys.join("\n")
+      end
+      scp("/tmp/authorized_keys", "/home/ec2-user/.ssh/authorized_keys", mode: "0600")
     end
 
     def setup_update_script
@@ -151,11 +168,34 @@ module PullPreview
       end
     end
 
-    def setup_ssh_access
-      File.open("/tmp/authorized_keys", "w+") do |f|
-        f.write ssh_public_keys.join("\n")
+    def setup_prepost_scripts
+      tmpfile = Tempfile.new(["prescript", ".sh"])
+      tmpfile.puts "#!/bin/bash -e"
+      registries.each_with_index do |registry, index|
+        begin
+          uri = URI.parse(registry)
+          raise Error, "Invalid registry" if uri.host.nil? || uri.scheme != "docker"
+          username = uri.user
+          password = uri.password
+          if password.nil?
+            password = username
+            username = "doesnotmatter"
+          end
+          tmpfile.puts 'echo "Logging into ghcr.io..."'
+          # https://docs.github.com/en/packages/guides/using-github-packages-with-github-actions#upgrading-a-workflow-that-accesses-ghcrio
+          tmpfile.puts 'echo "%{password}" | docker login "%{host}" -u "%{username}" --password-stdin' % {
+            host: uri.host,
+            username: username,
+            password: password,
+          }
+        rescue URI::Error, Error => e
+          logger.warn "Registry ##{index} is invalid: #{e.message}"
+        end
       end
-      scp("/tmp/authorized_keys", "/home/ec2-user/.ssh/authorized_keys", mode: "0600")
+      tmpfile.flush
+      unless scp(tmpfile.path, "/tmp/pre_script.sh", mode: "0755")
+        raise Error, "Unable to copy the pre script on instance. Aborting."
+      end
     end
 
     def wait_until_running!
@@ -168,10 +208,10 @@ module PullPreview
     end
 
     def wait_until_ssh_ready!
-      if wait_until { logger.info "waiting for ssh" ; ssh_ready? }
-        logger.info "instance ssh access OK"
+      if wait_until { logger.info "Waiting for ssh" ; ssh_ready? }
+        logger.info "Instance ssh access OK"
       else
-        logger.error "instance ssh access KO"
+        logger.error "Instance ssh access KO"
         raise Error, "Can't connect to instance over SSH. Aborting."
       end
     end

@@ -64,6 +64,11 @@ tar xzf "$1" -C "$APP_PATH"
 
 cd "$APP_PATH"
 
+if ! /tmp/pre_script.sh ; then
+  echo "Failed to run the pre-script"
+  exit 1
+fi
+
 pull() {
   docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
 }
