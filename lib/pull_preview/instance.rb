@@ -172,8 +172,9 @@ module PullPreview
       tmpfile = Tempfile.new(["prescript", ".sh"])
       tmpfile.puts "#!/bin/bash -e"
       registries.each_with_index do |registry, index|
-        uri = URI.parse(registry)
-        if uri.host == "ghcr.io"
+        begin
+          uri = URI.parse(registry)
+          raise Error, "Invalid registry" if uri.host.nil? || uri.scheme != "docker"
           username = uri.user
           password = uri.password
           if password.nil?
@@ -182,12 +183,13 @@ module PullPreview
           end
           tmpfile.puts 'echo "Logging into ghcr.io..."'
           # https://docs.github.com/en/packages/guides/using-github-packages-with-github-actions#upgrading-a-workflow-that-accesses-ghcrio
-          tmpfile.puts 'echo "%{password}" | docker login ghcr.io -u "%{username}" --password-stdin' % {
+          tmpfile.puts 'echo "%{password}" | docker login "%{host}" -u "%{username}" --password-stdin' % {
+            host: uri.host,
             username: username,
             password: password,
           }
-        else
-          logger.warn "Registry ##{index} not supported"
+        rescue URI::Error, Error => e
+          logger.warn "Registry ##{index} is invalid: #{e.message}"
         end
       end
       tmpfile.flush
