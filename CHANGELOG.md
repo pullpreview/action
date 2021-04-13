@@ -1,6 +1,7 @@
 ## master
 
-* Properly handle `workflow_dispatch` events.
+* Properly handle `repository_dispatch` events.
+* Add support for private registries, e.g. `registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io` in workflow file.
 
 ## v5 - 20210218
 

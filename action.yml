@@ -43,7 +43,7 @@ inputs:
     required: false
     default: 'small_2_0'
   registries:
-    description: 'Names of private registries to authenticate against. Only ghcr.io is supported at the moment. E.g. ghcr.io/username'
+    description: 'Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io' 
     required: false
     default: ''
 
