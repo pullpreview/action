@@ -26,6 +26,7 @@ end
 up_opts = lambda do |o|
   o.array '--admins', 'Logins of GitHub users that will have their SSH key installed on the instance'
   o.array '--cidrs', 'The IP address, or range of IP addresses in CIDR notation, that are allowed to connect to the instance', default: ["0.0.0.0/0"]
+  o.array '--registries', 'The FQDN of registries to authenticate against, e.g. ghcr.io', default: []
   o.string '--dns', 'Enable DNS support for pretty-looking URLs', default: "my.pullpreview.com"
   o.array '--ports', 'Ports to open for external access on the preview server', default: [
     "80/tcp", "443/tcp", "1000-10000/tcp"

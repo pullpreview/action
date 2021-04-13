@@ -42,6 +42,11 @@ inputs:
     description: 'Instance type to use'
     required: false
     default: 'small_2_0'
+  registries:
+    description: 'Names of private registries to authenticate against. Only ghcr.io is supported at the moment. E.g. ghcr.io/username'
+    required: false
+    default: ''
+
 outputs:
   url:
     description: 'The URL of the application on the preview server'
@@ -72,5 +77,7 @@ runs:
     - "${{ inputs.always_on }}"
     - "--instance-type"
     - "${{ inputs.instance_type }}"
+    - "--registries"
+    - "${{ inputs.registries }}"
   env:
     GITHUB_TOKEN: "${{ inputs.github_token }}"
