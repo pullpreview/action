@@ -53,10 +53,8 @@ echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
 echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
 
-<%- if locals.custom_env_vars&.any? %>
-<%- locals.custom_env_vars.each do |k, v| %>
+<% locals.custom_env_vars.each do |k, v| %>
 echo <%= "#{k}=#{v}" %> >> $PULLPREVIEW_ENV_FILE
-<% end %>
 <% end %>
 
 set -o allexport
