@@ -53,7 +53,7 @@ echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
 echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
 
-if [ -n "$PULLPREVIEW_ENV_VARS" ] ; then
+if [ -n "${PULLPREVIEW_ENV_VARS}" ] ; then
 while read -d, -r pair; do
   IFS='=' read -r key val <<<"$pair"
   echo "$key=$val" >> $PULLPREVIEW_ENV_FILE
@@ -78,7 +78,7 @@ if ! /tmp/pre_script.sh ; then
   exit 1
 fi
 
-if [ -n "$PULLPREVIEW_LAUNCH_COMMAND" ] ; then
+if [ -n "${PULLPREVIEW_LAUNCH_COMMAND}" ] ; then
   echo "Command to be executed: $PULLPREVIEW_LAUNCH_COMMAND"
   exec bash -c "$PULLPREVIEW_LAUNCH_COMMAND"
 fi
