@@ -5,7 +5,8 @@ set -o pipefail
 
 APP_TARBALL="$1"
 APP_PATH="<%= locals.remote_app_path %>"
-PULLPREVIEW_LAUNCH_COMMAND="<%= locals.launch_command %>"
+PULLPREVIEW_LAUNCH_COMMAND="<%= locals.custom_launch_command %>"
+PULLPREVIEW_ENV_VARS="<%= locals.custom_env_vars %>"
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
 
 lock_file="/tmp/update.lock"
@@ -51,6 +52,12 @@ echo 'PULLPREVIEW_PUBLIC_DNS=<%= locals.public_dns %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
 echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
+
+<%- if locals.custom_env_vars&.any? %>
+<%- locals.custom_env_vars.each do |k, v| %>
+echo <%= "#{k}=#{v}" %> >> $PULLPREVIEW_ENV_FILE
+<% end %>
+<% end %>
 
 set -o allexport
 source $PULLPREVIEW_ENV_FILE

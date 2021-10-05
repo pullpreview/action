@@ -1,4 +1,5 @@
 require "erb"
+require "json"
 require "ostruct"
 
 module PullPreview
@@ -132,12 +133,17 @@ module PullPreview
         public_dns: public_dns,
         admins: admins,
         url: url,
-        launch_command: launch_command
+        custom_launch_command: custom_launch_command,
+        custom_env_vars: custom_env_vars
       )
     end
 
-    def launch_command
+    def custom_launch_command
       ENV.fetch("PULLPREVIEW_LAUNCH_COMMAND", "")
+    end
+
+    def custom_env_vars
+      JSON.parse(ENV.fetch("PULLPREVIEW_ENV_VARS", "{}"))
     end
 
     def github_token
