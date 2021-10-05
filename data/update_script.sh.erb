@@ -53,9 +53,12 @@ echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
 echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
 
-<% locals.custom_env_vars.each do |k, v| %>
-echo <%= "#{k}=#{v}" %> >> $PULLPREVIEW_ENV_FILE
-<% end %>
+if [ -n "$PULLPREVIEW_ENV_VARS" ] ; then
+while read -d, -r pair; do
+  IFS='=' read -r key val <<<"$pair"
+  echo "$key=$val"  >> $PULLPREVIEW_ENV_FILE
+done <<<"$string1,"
+fi
 
 set -o allexport
 source $PULLPREVIEW_ENV_FILE

@@ -1,5 +1,4 @@
 require "erb"
-require "json"
 require "ostruct"
 
 module PullPreview
@@ -143,7 +142,7 @@ module PullPreview
     end
 
     def custom_env_vars
-      JSON.parse(ENV.fetch("PULLPREVIEW_ENV_VARS", "{}"))
+      ENV.fetch("PULLPREVIEW_ENV_VARS", "")
     end
 
     def github_token
