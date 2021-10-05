@@ -56,8 +56,8 @@ echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
 if [ -n "$PULLPREVIEW_ENV_VARS" ] ; then
 while read -d, -r pair; do
   IFS='=' read -r key val <<<"$pair"
-  echo "$key=$val"  >> $PULLPREVIEW_ENV_FILE
-done <<<"$string1,"
+  echo "$key=$val" >> $PULLPREVIEW_ENV_FILE
+done <<<"$PULLPREVIEW_ENV_VARS,"
 fi
 
 set -o allexport
