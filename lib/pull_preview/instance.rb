@@ -111,7 +111,7 @@ module PullPreview
 
     def latest_snapshot
       @latest_snapshot ||= client.get_instance_snapshots.instance_snapshots.sort{|a,b| b.created_at <=> a.created_at}.find do |snap|
-        snap.state == "available" && snap.from_instance_name == name
+        snap.state == "available" && (snap.name == snapshot_name || snap.from_instance_name == name)
       end
     end
 
@@ -143,6 +143,10 @@ module PullPreview
 
     def custom_env_vars
       ENV.fetch("PULLPREVIEW_ENV_VARS", "")
+    end
+
+    def snapshot_name
+      ENV.fetch("PULLPREVIEW_SNAPSHOT_NAME", "")
     end
 
     def github_token
