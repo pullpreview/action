@@ -5,7 +5,7 @@ set -o pipefail
 
 APP_TARBALL="$1"
 APP_PATH="<%= locals.remote_app_path %>"
-INIT_CMD="<%= locals.init_cmd %>"""
+PULLPREVIEW_LAUNCH_COMMAND="<%= locals.launch_command %>"
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
 
 lock_file="/tmp/update.lock"
@@ -72,8 +72,7 @@ fi
 
 if [ -n "$INIT_CMD" ] ; then
   echo "Command to be executed: $INIT_CMD"
-  bash -c "$INIT_CMD"
-  exit $?
+  exec bash -c "$INIT_CMD"
 fi
 
 pull() {
