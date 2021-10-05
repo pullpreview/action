@@ -5,6 +5,7 @@ set -o pipefail
 
 APP_TARBALL="$1"
 APP_PATH="<%= locals.remote_app_path %>"
+INIT_CMD="<%= locals.init_cmd %>"""
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
 
 lock_file="/tmp/update.lock"
@@ -67,6 +68,12 @@ cd "$APP_PATH"
 if ! /tmp/pre_script.sh ; then
   echo "Failed to run the pre-script"
   exit 1
+fi
+
+if [ -n "$INIT_CMD" ] ; then
+  echo "Command to be executed: $INIT_CMD"
+  bash -c "$INIT_CMD"
+  exit $?
 fi
 
 pull() {

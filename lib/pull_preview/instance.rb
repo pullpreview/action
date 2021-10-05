@@ -132,7 +132,12 @@ module PullPreview
         public_dns: public_dns,
         admins: admins,
         url: url,
+        init_cmd: init_cmd
       )
+    end
+
+    def init_cmd
+      ENV.fetch("INIT_CMD", "")
     end
 
     def github_token
