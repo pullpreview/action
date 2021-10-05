@@ -80,7 +80,7 @@ fi
 
 if [ -n "${PULLPREVIEW_LAUNCH_COMMAND}" ] ; then
   echo "Command to be executed: $PULLPREVIEW_LAUNCH_COMMAND"
-  exec bash -c "$PULLPREVIEW_LAUNCH_COMMAND"
+  bash -c "$PULLPREVIEW_LAUNCH_COMMAND" ; exit $?
 fi
 
 pull() {
