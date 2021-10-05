@@ -75,9 +75,9 @@ if ! /tmp/pre_script.sh ; then
   exit 1
 fi
 
-if [ -n "$INIT_CMD" ] ; then
-  echo "Command to be executed: $INIT_CMD"
-  exec bash -c "$INIT_CMD"
+if [ -n "$PULLPREVIEW_LAUNCH_COMMAND" ] ; then
+  echo "Command to be executed: $PULLPREVIEW_LAUNCH_COMMAND"
+  exec bash -c "$PULLPREVIEW_LAUNCH_COMMAND"
 fi
 
 pull() {
