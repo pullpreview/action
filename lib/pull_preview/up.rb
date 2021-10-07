@@ -21,7 +21,7 @@ module PullPreview
       instance_name = opts[:name]
 
       PullPreview.logger.info "Taring up repository at #{app_path.inspect}..."
-      unless system("tar czf /tmp/app.tar.gz --exclude-from=.dockerignore -C '#{app_path}' .")
+      unless system("tar cf /tmp/app.tar.gz --use-compress-program='pigz -k -9' --exclude-from=.dockerignore -C '#{app_path}' .")
         exit 1
       end
 
