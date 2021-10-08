@@ -5,8 +5,6 @@ set -o pipefail
 
 APP_TARBALL="$1"
 APP_PATH="<%= locals.remote_app_path %>"
-PULLPREVIEW_LAUNCH_COMMAND="<%= locals.custom_launch_command %>"
-PULLPREVIEW_ENV_VARS="<%= locals.custom_env_vars %>"
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
 
 lock_file="/tmp/update.lock"
@@ -53,35 +51,22 @@ echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
 echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
 
-if [ -n "${PULLPREVIEW_ENV_VARS}" ] ; then
-while read -d, -r pair; do
-  IFS='=' read -r key val <<<"$pair"
-  echo "$key=$val" >> $PULLPREVIEW_ENV_FILE
-done <<<"$PULLPREVIEW_ENV_VARS,"
-fi
-
 set -o allexport
 source $PULLPREVIEW_ENV_FILE
 set +o allexport
 
 cd /
 
-sudo rm -rf "/tmp$APP_PATH"
-sudo mkdir -p "$APP_PATH" "/tmp$APP_PATH"
-sudo chown -R ec2-user.ec2-user "$APP_PATH" "/tmp$APP_PATH"
-tar xzf "$1" -C "/tmp$APP_PATH"
-rsync -auz "/tmp$APP_PATH" / --remove-source-files --delete
+sudo rm -rf "$APP_PATH"
+sudo mkdir -p "$APP_PATH"
+sudo chown -R ec2-user.ec2-user "$APP_PATH"
+tar xzf "$1" -C "$APP_PATH"
 
 cd "$APP_PATH"
 
 if ! /tmp/pre_script.sh ; then
   echo "Failed to run the pre-script"
   exit 1
-fi
-
-if [ -n "${PULLPREVIEW_LAUNCH_COMMAND}" ] ; then
-  echo "Command to be executed: $PULLPREVIEW_LAUNCH_COMMAND"
-  bash -c "$PULLPREVIEW_LAUNCH_COMMAND" ; exit $?
 fi
 
 pull() {
