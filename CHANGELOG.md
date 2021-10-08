@@ -1,8 +1,5 @@
 ## master
 
-* Add optional `PULLPREVIEW_SNAPSHOT_NAME` environment variable, which can be used to restore from a specific snapshot name rather than a snapshot for a specific instance name.
-* Add optional `PULLPREVIEW_ENV_VARS` environment variable, which can be passed through, to set any environment variables during launch/update.
-* Add optional `PULLPREVIEW_LAUNCH_COMMAND` environment variable, which can be passed through, to replace docker-compose launch/update commands.
 * Properly handle `repository_dispatch` events.
 * Add support for private registries, e.g. `registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io` in workflow file.
 
