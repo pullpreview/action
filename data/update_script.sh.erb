@@ -70,7 +70,7 @@ sudo rm -rf "/tmp$APP_PATH"
 sudo mkdir -p "$APP_PATH" "/tmp$APP_PATH"
 sudo chown -R ec2-user.ec2-user "$APP_PATH" "/tmp$APP_PATH"
 tar xzf "$1" -C "/tmp$APP_PATH"
-rsync -auz "/tmp$APP_PATH" / --remove-source-files
+rsync -auz "/tmp$APP_PATH" / --remove-source-files --delete
 
 cd "$APP_PATH"
 
