@@ -1,7 +1,6 @@
 Gem::Specification.new do |s|
   s.name               = 'pullpreview'
   s.version            = '0.0.1'
-  s.default_executable = 'pullpreview'
 
   s.authors = ['Cyril Rohr', 'Manuel Fittko']
   s.date = '2021-10-19'
