@@ -12,10 +12,49 @@ module PullPreview
     attr_reader :subdomain
     attr_reader :ports
     attr_reader :registries
+    attr_reader :ip_prefix
+    attr_reader :swap_enabled; alias_method :swap_enabled?, :swap_enabled
 
     class << self
       attr_accessor :client
       attr_accessor :logger
+    end
+
+    class Provisioner
+      class << self
+        def ssh_access(ssh_public_keys)
+          %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys}
+        end
+
+        def prepare_user(remote_app_path)
+          [
+            "mkdir -p #{remote_app_path} && chown -R ec2-user.ec2-user #{remote_app_path}",
+            "echo 'cd #{remote_app_path}' > /etc/profile.d/pullpreview.sh"
+          ]
+        end
+
+        def setup_swapping
+          [
+            "sudo sed -i '/^tmpfs/c\tmpfs       \/dev\/shm    tmpfs   defaults,size=256M  0   0' /etc/fstab",
+            "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf"
+          ]
+        end
+
+        def install_and_setup_docker
+          [
+            "yum install -y docker",
+            %{curl -L "https://github.com/docker/compose/releases/download/1.25.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
+            "chmod +x /usr/local/bin/docker-compose",
+            "usermod -aG docker ec2-user",
+            "service docker start",
+            "echo 'docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune"
+          ]
+        end
+
+        def finish_setup
+          "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview"
+        end
+      end
     end
 
     def self.normalize_name(name)
@@ -36,7 +75,9 @@ module PullPreview
       @compose_files = opts[:compose_files] || ["docker-compose.yml"]
       @registries = opts[:registries] || []
       @dns = opts[:dns]
+      @ip_prefix = opts[:ip_prefix] || "ip"
       @ssh_results = []
+      @swap_enabled = !opts[:disable_swap]
     end
 
     def remote_app_path
@@ -78,32 +119,33 @@ module PullPreview
       if latest_snapshot
         logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
         logger.info "Creating new instance name=#{name}..."
-        client.create_instances_from_snapshot(params.merge({
-          user_data: [
-            "service docker restart"
-          ].join(" && "),
-          instance_snapshot_name: latest_snapshot.name,
-        }))
+        client.create_instances_from_snapshot(params.merge(
+          user_data: init_from_snapshot_command,
+          instance_snapshot_name: latest_snapshot.name
+        ))
       else
         logger.info "Creating new instance name=#{name}..."
-        client.create_instances(params.merge({
-          user_data: [
-            %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys},
-            "mkdir -p #{REMOTE_APP_PATH} && chown -R ec2-user.ec2-user #{REMOTE_APP_PATH}",
-            "echo 'cd #{REMOTE_APP_PATH}' > /etc/profile.d/pullpreview.sh",
-            "sudo sed -i '/^tmpfs/c\tmpfs       \/dev\/shm    tmpfs   defaults,size=256M  0   0' /etc/fstab",
-            "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf",
-            "yum install -y docker",
-            %{curl -L "https://github.com/docker/compose/releases/download/1.25.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
-            "chmod +x /usr/local/bin/docker-compose",
-            "usermod -aG docker ec2-user",
-            "service docker start",
-            "echo 'docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune",
-            "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
-          ].join(" && "),
+        client.create_instances(params.merge(
+          user_data: setup_command,
           blueprint_id: blueprint_id
-        }))
+        ))
       end
+    end
+
+    def init_from_snapshot_command
+      [
+        "service docker restart"
+      ].join(" && ")
+    end
+
+    def setup_command
+      [
+        Provisioner.ssh_access(ssh_public_keys),
+        Provisioner.prepare_user(REMOTE_APP_PATH),
+        swap_enabled? ? Provisioner.setup_swapping : nil,
+        Provisioner.install_and_setup_docker,
+        Provisioner.finish_setup
+      ].flatten.reject(&:empty?).join(" && ")
     end
 
     def latest_snapshot
@@ -296,9 +338,9 @@ module PullPreview
 
     def public_dns
       # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
-      remaining_chars_for_subdomain = 62 - dns.size - public_ip.size - "ip".size - ("." * 3).size
+      remaining_chars_for_subdomain = 62 - dns.size - public_ip.size - ip_prefix.size - ("." * 3).size
       [
-        [subdomain[0..remaining_chars_for_subdomain], "ip", public_ip.gsub(".", "-")].join("-"),
+        [subdomain[0..remaining_chars_for_subdomain], ip_prefix, public_ip.gsub(".", "-")].compact.join("-"),
         dns
       ].join(".")
     end
