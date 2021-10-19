@@ -14,7 +14,7 @@ module PullPreview
     attr_reader :registries
     attr_reader :ip_prefix
     attr_reader :swap_enabled
-    alias :swap_enabled? :swap_enabled
+    alias swap_enabled? swap_enabled
 
     class << self
       attr_accessor :client
@@ -78,7 +78,7 @@ module PullPreview
       @compose_files = opts[:compose_files] || ["docker-compose.yml"]
       @registries = opts[:registries] || []
       @dns = opts[:dns]
-      @ip_prefix = opts[:ip_prefix] || "ip"
+      @ip_prefix = opts.key?(:ip_prefix) ? opts[:ip_prefix] : "ip"
       @ssh_results = []
       @swap_enabled = !opts[:disable_swap]
     end
@@ -341,7 +341,7 @@ module PullPreview
 
     def public_dns
       # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
-      remaining_chars_for_subdomain = 62 - dns.size - public_ip.size - ip_prefix.size - ("." * 3).size
+      remaining_chars_for_subdomain = 62 - dns.size - public_ip.size - (ip_prefix&.size || 0) - ("." * 3).size
       [
         [subdomain[0..remaining_chars_for_subdomain], ip_prefix, public_ip.gsub(".", "-")].compact.join("-"),
         dns
