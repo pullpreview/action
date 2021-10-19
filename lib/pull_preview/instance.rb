@@ -21,6 +21,8 @@ module PullPreview
     end
 
     class Provisioner
+      COMPOSE_VERSION = "1.29.2".freeze
+
       class << self
         def ssh_access(ssh_public_keys)
           %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys}
@@ -43,7 +45,7 @@ module PullPreview
         def install_and_setup_docker
           [
             "yum install -y docker",
-            %{curl -L "https://github.com/docker/compose/releases/download/1.25.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
+            %{curl -L "https://github.com/docker/compose/releases/download/#{COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
             "chmod +x /usr/local/bin/docker-compose",
             "usermod -aG docker ec2-user",
             "service docker start",
