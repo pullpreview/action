@@ -1,13 +1,19 @@
-Gem::Specification.new do |s|
-  s.name               = 'pullpreview'
-  s.version            = '0.0.1'
+Gem::Specification.new do |spec|
+  spec.name               = 'pullpreview'
+  spec.version            = '0.0.1'
 
-  s.authors = ['Cyril Rohr', 'Manuel Fittko']
-  s.date = '2021-10-19'
-  s.description = '1-click preview environments for GitHub repositories.'
-  s.email = 'info@mfittko.com'
-  s.files = ['lib/pull_preview.rb', 'bin/pullpreview']
-  s.homepage = 'https://pullpreview.com/'
-  s.require_paths = ['lib']
-  s.summary = 'pullpreview!'
+  spec.authors = ['Cyril Rohr', 'Manuel Fittko']
+  spec.date = '2021-10-19'
+  spec.description = '1-click preview environments for GitHub repositoriespec.'
+  spec.email = 'info@mfittko.com'
+  spec.files = Dir['lib/**/*']
+  spec.executables   = ['pullpreview']
+  spec.homepage = 'https://pullpreview.com/'
+  spec.require_paths = ['lib']
+  spec.summary = 'pullpreview!'
+  spec.required_ruby_version = '>= 2.4.0'
+  spec.add_dependency 'aws-sdk-lightsail', '~> 1.30'
+  spec.add_dependency 'slop', '~> 4.8'
+  spec.add_dependency 'octokit', '~> 4.18'
+  spec.add_dependency 'terminal-table', '~> 1.8'
 end
