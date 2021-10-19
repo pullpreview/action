@@ -9,6 +9,7 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*"]
   spec.executables   = ["pullpreview"]
   spec.homepage = "https://pullpreview.com/"
+  spec.require_paths = ["lib", "lib/pull_preview"]
   spec.summary = "pullpreview!"
   spec.required_ruby_version = ">= 2.4.0"
   spec.add_dependency "aws-sdk-lightsail", "~> 1.30"
