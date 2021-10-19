@@ -13,7 +13,8 @@ module PullPreview
     attr_reader :ports
     attr_reader :registries
     attr_reader :ip_prefix
-    attr_reader :swap_enabled; alias_method :swap_enabled?, :swap_enabled
+    attr_reader :swap_enabled
+    alias :swap_enabled? :swap_enabled
 
     class << self
       attr_accessor :client
