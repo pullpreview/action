@@ -79,5 +79,6 @@ runs:
     - "${{ inputs.instance_type }}"
     - "--registries"
     - "${{ inputs.registries }}"
+    - "--verbose"
   env:
     GITHUB_TOKEN: "${{ inputs.github_token }}"
