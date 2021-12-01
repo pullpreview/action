@@ -1,4 +1,4 @@
-FROM ruby:2.7-alpine
+FROM ruby:2.7-slim
 
 RUN apk --no-cache add git openssh-client less
 WORKDIR /app
