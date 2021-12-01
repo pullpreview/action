@@ -268,7 +268,8 @@ module PullPreview
       end
       [key_file_path, cert_key_path].each{|file| FileUtils.chmod 0600, file}
       logger.debug "key_file_content=#{File.read(key_file_path)}"
-      logger.debug "cert_key_content=#{File.read(cert_key_path)}"
+      logger.debug "cert_key_content=#{File.read(cert_key_path)}"      
+
       cmd = "ssh #{"-v " if logger.level == Logger::DEBUG}-o ServerAliveInterval=15 -i #{key_file_path} #{ssh_address} #{ssh_options.join(" ")} '#{command}'"
       if input && input.respond_to?(:path)
         cmd = "cat #{input.path} | #{cmd}"
