@@ -1,5 +1,6 @@
 FROM ruby:2.7-slim
 
+RUN apt-get update && apt-get install openssh-client git -y
 WORKDIR /app
 COPY Gemfile .
 COPY Gemfile.lock .
