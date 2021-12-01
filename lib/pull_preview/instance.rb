@@ -258,11 +258,11 @@ module PullPreview
     end
 
     def ssh(command, input: nil)
-      key_file = Tempfile.new
-      key_file_path = key_file.path
-      cert_key_path = key_file_path + "-cert.pub"
-      key_file.write access_details.private_key
-      key_file.close
+      key_file_path = "/tmp/tempkey"
+      cert_key_path = "/tmp/tempkey-cert.pub"
+      File.open(key_file_path, "w+") do |f|
+        f.puts access_details.private_key
+      end
       File.open(cert_key_path, "w+") do |f|
         f.puts access_details.cert_key
       end
