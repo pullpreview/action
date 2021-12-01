@@ -1,6 +1,5 @@
 FROM ruby:2.7-slim
 
-RUN apk --no-cache add git openssh-client less
 WORKDIR /app
 COPY Gemfile .
 COPY Gemfile.lock .
