@@ -320,7 +320,9 @@ module PullPreview
       @access_details ||= client.get_instance_access_details({
         instance_name: name,
         protocol: "ssh", # accepts ssh, rdp
-      }).access_details
+      }).access_details.tap do |details|
+        logger.debug "access_details=#{details.inspect}"
+      end
     end
 
     def client
