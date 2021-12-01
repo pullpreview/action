@@ -1,6 +1,6 @@
-FROM ruby:2.7-alpine
+FROM ruby:2.7-slim
 
-RUN apk --no-cache add git openssh-client less
+RUN apt-get update -qq && apt-get install openssh-client git -y
 WORKDIR /app
 COPY Gemfile .
 COPY Gemfile.lock .

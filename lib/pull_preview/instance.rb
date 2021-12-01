@@ -258,16 +258,17 @@ module PullPreview
     end
 
     def ssh(command, input: nil)
-      cert_key_path = "/tmp/tempkey-cert.pub"
       key_file_path = "/tmp/tempkey"
-      File.open(cert_key_path, "w+") do |f|
-        f.write access_details.cert_key
-      end
+      cert_key_path = "/tmp/tempkey-cert.pub"
       File.open(key_file_path, "w+") do |f|
-        f.write access_details.private_key
+        f.puts access_details.private_key
       end
-      [key_file_path, cert_key_path].each{|file| FileUtils.chmod 0600, file}
-      cmd = "ssh -o ServerAliveInterval=15 -i #{key_file_path} #{ssh_address} #{ssh_options.join(" ")} '#{command}'"
+      File.open(cert_key_path, "w+") do |f|
+        f.puts access_details.cert_key
+      end
+      [key_file_path].each{|file| FileUtils.chmod 0600, file}
+
+      cmd = "ssh #{"-v " if logger.level == Logger::DEBUG}-o ServerAliveInterval=15 -o IdentitiesOnly=yes -i #{key_file_path} #{ssh_address} #{ssh_options.join(" ")} '#{command}'"
       if input && input.respond_to?(:path)
         cmd = "cat #{input.path} | #{cmd}"
       end
@@ -318,7 +319,9 @@ module PullPreview
       @access_details ||= client.get_instance_access_details({
         instance_name: name,
         protocol: "ssh", # accepts ssh, rdp
-      }).access_details
+      }).access_details.tap do |details|
+        logger.debug "access_details=#{details.inspect}"
+      end
     end
 
     def client
