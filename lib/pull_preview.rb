@@ -6,7 +6,7 @@ require_relative "./pull_preview/error"
 require_relative "./pull_preview/instance"
 require_relative "./pull_preview/up"
 require_relative "./pull_preview/down"
-require_relative "./pull_preview/sync_with_github"
+require_relative "./pull_preview/github_sync"
 require_relative "./pull_preview/list"
 require_relative "./pull_preview/license"
 

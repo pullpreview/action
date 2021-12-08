@@ -1,7 +1,7 @@
 require "octokit"
 
 module PullPreview
-  class SyncWithGithub
+  class GithubSync
     attr_reader :github_context
     attr_reader :app_path
     # CLI options, already parsed
@@ -11,12 +11,40 @@ module PullPreview
     LABEL = "pullpreview"
 
     def self.run(app_path, opts)
+      github_event_name = ENV.fetch("GITHUB_EVENT_NAME")
+      PullPreview.logger.debug "github_event_name = #{github_event_name.inspect}"
+
+      if github_event_name == "schedule"
+        return clear_dangling_deployments(ENV.fetch("GITHUB_REPOSITORY"))
+      end
+
       github_event_path = ENV.fetch("GITHUB_EVENT_PATH")
       # https://developer.github.com/v3/activity/events/types/#pushevent
       # https://help.github.com/en/actions/reference/events-that-trigger-workflows
       github_context = JSON.parse(File.read(github_event_path))
       PullPreview.logger.debug "github_context = #{github_context.inspect}"
       self.new(github_context, app_path, opts).sync!
+    end
+
+    # Go over closed pull requests that are still labelled as "pullpreview", and force the destroyal of the corresponding environments
+    # This happens sometimes, when a pull request is closed, but the environment is not destroyed due to some GitHub Action hiccup.
+    def self.clear_dangling_deployments(repo)
+      inactive_pr_issues_still_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: LABEL, pulls: true, state: "closed")
+      inactive_pr_issues_still_labeled.each do |pr_issue|
+        pr = PullPreview.octokit.get(pr_issue.pull_request.url)
+        PullPreview.logger.warn "Found dangling #{LABEL} label for PR##{pr.number}. Cleaning up..."
+        fake_github_context = OpenStruct.new(
+          action: "closed",
+          number: pr.number,
+          pull_request: pr,
+          ref: pr.head.ref,
+          repository: pr.base.repo,
+        )
+        if pr.base.repo.owner.type == "Organization"
+          fake_github_context.organization = pr.base.repo.owner
+        end
+        new(fake_github_context).sync!
+      end
     end
 
     def self.clear_deployments_for(repo, environment, force: false)
@@ -38,7 +66,7 @@ module PullPreview
       PullPreview.logger.warn "Unable to clear deployments for environment #{environment.inspect}: #{e.message}"
     end
 
-    def initialize(github_context, app_path, opts)
+    def initialize(github_context, app_path = nil, opts = {})
       @github_context = github_context
       @app_path = app_path
       @opts = opts
@@ -55,19 +83,20 @@ module PullPreview
         return true
       end
 
-      pp_action = guess_action_from_event
+      pp_action = guess_action_from_event.to_sym
       license = PullPreview::License.new(org_id, repo_id, pp_action).fetch!
       PullPreview.logger.info license.message
 
       case pp_action
       when :pr_down, :branch_down
         instance = Instance.new(instance_name)
-        unless instance.running?
-          PullPreview.logger.info "Ignoring event"
-          return true
-        end
         update_github_status(:destroying)
-        Down.run(name: instance_name)
+
+        if instance.running?
+          Down.run(name: instance_name)
+        else
+          PullPreview.logger.warn "Instance #{instance_name.inspect} already down. Continuing..."
+        end
         if pr_closed?
           PullPreview.logger.info "Removing label #{LABEL} from PR##{pr_number}..."
           octokit.remove_label(repo, pr_number, LABEL)
@@ -85,7 +114,7 @@ module PullPreview
         )
         update_github_status(:deployed, instance.url)
       else
-        PullPreview.logger.info "Ignoring event"
+        PullPreview.logger.info "Ignoring event #{pp_action.inspect}"
       end
     rescue => e
       update_github_status(:error)
@@ -180,7 +209,7 @@ module PullPreview
     end
 
     def organization?
-      github_context.has_key?("organization")
+      github_context["organization"]
     end
 
     def org_name
@@ -258,7 +287,7 @@ module PullPreview
     end
 
     def pull_request?
-      github_context.has_key?("pull_request")
+      github_context["pull_request"]
     end
 
     def push?
@@ -293,7 +322,7 @@ module PullPreview
 
     def pr_number
       @pr_number ||= if pull_request?
-        github_context["number"]
+        github_context["pull_request"]["number"]
       elsif pr_from_ref
         pr_from_ref[:number]
       else
