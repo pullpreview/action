@@ -1,5 +1,7 @@
 ## master
 
+- Add automated cleanup for dangling resources, to be launched as a scheduled job.
+
 ## v5 - updated on 20211201
 
 - Fix issue with alpine ruby no longer having the correct ciphers for connecting to lightsail instances.
