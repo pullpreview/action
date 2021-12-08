@@ -76,7 +76,7 @@ begin
       exit 1
     end
 
-    PullPreview::SyncWithGithub.run(app_path, opts.to_hash)
+    PullPreview::GithubSync.run(app_path, opts.to_hash)
   when "console"
     binding.pry
   when "list"
