@@ -1,7 +1,7 @@
 name: pullpreview
 on:
   schedule:
-    - cron: "30 2 * * *"
+    - cron: "30 * * * *"
   push:
     branches:
       - master
@@ -11,7 +11,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v2
