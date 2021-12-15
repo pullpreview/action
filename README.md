@@ -101,7 +101,7 @@ on:
 
 jobs:
   deploy:
-    if: github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
