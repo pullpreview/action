@@ -1,63 +1,63 @@
-name: 'PullPreview'
-description: 'Automatically spin and maintain preview environments for your pull requests'
-author: 'Cyril Rohr'
+name: "PullPreview"
+description: "Automatically spin and maintain preview environments for your pull requests"
+author: "Cyril Rohr"
 branding:
   icon: anchor
   color: purple
 inputs:
   app_path:
-    description: 'The path to your application containing a docker-compose file'
+    description: "The path to your application containing a docker-compose file"
     default: "/github/workspace"
     required: false
   always_on:
-    description: 'List of always-on branches, irrespective of whether they correspond to an open Pull Request, comma-separated'
-    default: ''
+    description: "List of always-on branches, irrespective of whether they correspond to an open Pull Request, comma-separated"
+    default: ""
   dns:
-    description: 'Which DNS suffix to use'
-    default: 'my.pullpreview.com'
+    description: "Which DNS suffix to use"
+    default: "my.pullpreview.com"
   github_token:
-    description: 'The personal access token used to update the status of your commit'
+    description: "The personal access token used to update the status of your commit"
     default: "${{ github.token }}"
   admins:
-    description: 'Logins of GitHub users that will have their SSH key installed on the instance, comma-separated'
+    description: "Logins of GitHub users that will have their SSH key installed on the instance, comma-separated"
     required: false
-    default: ''
+    default: ""
   ports:
-    description: 'Ports to open for external access on the preview server (port 22 is always open), comma-separated'
+    description: "Ports to open for external access on the preview server (port 22 is always open), comma-separated"
     required: false
     default: "80/tcp,443/tcp,1000-10000/tcp"
   cidrs:
-    description: 'The IP address, or range of IP addresses in CIDR notation, that are allowed to connect to the instance'
+    description: "The IP address, or range of IP addresses in CIDR notation, that are allowed to connect to the instance"
     required: false
-    default: '0.0.0.0/0'
+    default: "0.0.0.0/0"
   default_port:
-    description: 'The port to use when building the preview URL'
+    description: "The port to use when building the preview URL"
     required: false
     default: "80"
   compose_files:
-    description: 'Compose files to use when running docker-compose up, comma-separated'
+    description: "Compose files to use when running docker-compose up, comma-separated"
     required: false
-    default: 'docker-compose.yml'
+    default: "docker-compose.yml"
   instance_type:
-    description: 'Instance type to use'
+    description: "Instance type to use"
     required: false
-    default: 'small_2_0'
+    default: "small_2_0"
   registries:
-    description: 'Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io' 
+    description: "Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   url:
-    description: 'The URL of the application on the preview server'
+    description: "The URL of the application on the preview server"
   host:
-    description: 'The hostname or IP address of the preview server'
+    description: "The hostname or IP address of the preview server"
   username:
-    description: 'The username that can be used to SSH into the preview server'
+    description: "The username that can be used to SSH into the preview server"
 
 runs:
-  using: 'docker'
-  image: 'Dockerfile'
+  using: "docker"
+  image: "Dockerfile"
   args:
     - "github-sync"
     - "${{ inputs.app_path }}"
