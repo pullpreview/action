@@ -78,7 +78,7 @@ module PullPreview
       @compose_files = opts[:compose_files] || ["docker-compose.yml"]
       @registries = opts[:registries] || []
       @dns = opts[:dns]
-      @ip_prefix = opts.key?(:ip_prefix) ? opts[:ip_prefix] : "ip"
+      @ip_prefix = opts.key?(:ip_prefix) ? opts[:ip_prefix] : nil
       @ssh_results = []
       @swap_enabled = !opts[:disable_swap]
     end
