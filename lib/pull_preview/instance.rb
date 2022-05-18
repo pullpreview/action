@@ -32,7 +32,8 @@ module PullPreview
         def prepare_user(remote_app_path)
           [
             "mkdir -p #{remote_app_path} && chown -R ec2-user.ec2-user #{remote_app_path}",
-            "echo 'cd #{remote_app_path}' > /etc/profile.d/pullpreview.sh"
+            "echo 'cd #{remote_app_path}' > /etc/profile.d/pullpreview.sh",
+            "echo '[[ -f /etc/pullpreview/env ]] && set -o allexport; source /etc/pullpreview/env; set +o allexport' >> /etc/profile.d/pullpreview.sh"
           ]
         end
 
