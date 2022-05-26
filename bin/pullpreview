@@ -35,6 +35,7 @@ up_opts = lambda do |o|
   o.string '--default-port', 'Default port to use when displaying the instance hostname', default: "80"
   o.array '--tags', 'Tags to add to the instance'
   o.array '--compose-files', 'Compose files to use when running docker-compose up', default: ["docker-compose.yml"]
+  o.string '--subdomain', 'Instance subdomain (optional)'
 end
 
 begin
