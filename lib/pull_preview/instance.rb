@@ -356,7 +356,7 @@ module PullPreview
 
     def url
       scheme = (default_port == "443" ? "https" : "http")
-      "#{scheme}://#{basic_auth && basic_auth + '@'}#{public_dns}:#{default_port}"
+      "#{scheme}://sofa:mathe@#{public_dns}:#{default_port}"
     end
 
     def ssh_address
