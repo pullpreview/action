@@ -180,6 +180,10 @@ module PullPreview
       )
     end
 
+    def basic_auth
+      ENV.fetch("BASIC_AUTH", nil)
+    end
+
     def custom_launch_command
       ENV.fetch("PULLPREVIEW_LAUNCH_COMMAND", "")
     end
@@ -352,7 +356,7 @@ module PullPreview
 
     def url
       scheme = (default_port == "443" ? "https" : "http")
-      "#{scheme}://#{public_dns}:#{default_port}"
+      "#{scheme}://#{basic_auth && basic_auth + '@'}#{public_dns}:#{default_port}"
     end
 
     def ssh_address
