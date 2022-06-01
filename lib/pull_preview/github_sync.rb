@@ -23,7 +23,20 @@ module PullPreview
       # https://help.github.com/en/actions/reference/events-that-trigger-workflows
       github_context = JSON.parse(File.read(github_event_path))
       PullPreview.logger.debug "github_context = #{github_context.inspect}"
-      self.new(github_context, app_path, opts).sync!
+      github_sync = new(github_context, app_path, opts)
+      begin
+        seconds ||= 0.2
+        github_sync.sync!
+      rescue => e
+        if seconds > 10
+          raise e
+          github_sync.update_github_status(:error)
+        end
+
+        sleep seconds
+        seconds *= 2
+        retry
+      end
     end
 
     # Go over closed pull requests that are still labelled as "pullpreview", and force the destroyal of the corresponding environments
@@ -116,9 +129,6 @@ module PullPreview
       else
         PullPreview.logger.info "Ignoring event #{pp_action.inspect}"
       end
-    rescue => e
-      update_github_status(:error)
-      raise e
     end
 
     def guess_action_from_event
