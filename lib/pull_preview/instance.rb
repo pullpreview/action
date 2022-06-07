@@ -242,10 +242,10 @@ module PullPreview
             password = username
             username = "doesnotmatter"
           end
-          tmpfile.puts 'echo "Logging into ghcr.io..."'
+          tmpfile.puts 'echo "Logging into %{host}..."' % { host: uri.host }
           # https://docs.github.com/en/packages/guides/using-github-packages-with-github-actions#upgrading-a-workflow-that-accesses-ghcrio
-          tmpfile.puts 'echo "%{password}" | docker login "%{host}" -u "%{username}" --password-stdin' % {
-            host: uri.host,
+          tmpfile.puts 'echo "%{password}" | docker login %{host} -u "%{username}" --password-stdin' % {
+            host: uri.host.end_with?('docker.io') ? nil : '"' + uri.host + '"',
             username: username,
             password: password,
           }
