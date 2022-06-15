@@ -25,8 +25,8 @@ module PullPreview
       COMPOSE_VERSION = "1.29.2".freeze
 
       class << self
-        def ssh_access(ssh_public_keys)
-          %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys}
+        def ssh_access(ssh_public_key)
+          %{echo '#{ssh_public_key}' > /home/ec2-user/.ssh/authorized_keys}
         end
 
         def prepare_user(remote_app_path)
@@ -144,7 +144,7 @@ module PullPreview
 
     def setup_command
       [
-        Provisioner.ssh_access(ssh_public_keys),
+        Provisioner.ssh_access(ssh_public_keys.first),
         Provisioner.prepare_user(REMOTE_APP_PATH),
         swap_enabled? ? Provisioner.setup_swapping : nil,
         Provisioner.install_and_setup_docker,
