@@ -25,7 +25,7 @@ inputs:
   ports:
     description: "Ports to open for external access on the preview server (port 22 is always open), comma-separated"
     required: false
-    default: "80/tcp,443/tcp,1000-10000/tcp"
+    default: "80/tcp,443/tcp"
   cidrs:
     description: "The IP address, or range of IP addresses in CIDR notation, that are allowed to connect to the instance"
     required: false
