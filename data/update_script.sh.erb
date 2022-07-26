@@ -67,6 +67,9 @@ cd "$APP_PATH"
 echo "Cleaning up..."
 docker volume prune -f || true
 
+echo "Updating dependencies..."
+yum update -y || true
+
 if ! /tmp/pre_script.sh ; then
   echo "Failed to run the pre-script"
   exit 1
