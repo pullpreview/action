@@ -1,5 +1,10 @@
 ## master
 
+## v5 - updated on 20221104
+
+- Return :ignored action when no other action can be guessed.
+- Update system packages before running docker-compose.
+- Prune volumes before starting.
 - Add automated cleanup for dangling resources, to be launched as a scheduled job.
 
 ## v5 - updated on 20211201
