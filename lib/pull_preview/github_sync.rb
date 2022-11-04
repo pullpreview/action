@@ -149,6 +149,7 @@ module PullPreview
           return :ignored
         end
       end
+      :ignored
     end
 
     def commit_status_for(status)
