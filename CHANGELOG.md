@@ -1,5 +1,9 @@
 ## master
 
+## v5 - updated on 20221108
+
+- Fix pr_push event
+
 ## v5 - updated on 20221104
 
 - Return :ignored action when no other action can be guessed.

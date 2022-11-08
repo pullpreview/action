@@ -143,12 +143,13 @@ module PullPreview
 
       if push? || pr_synchronize?
         if pr_has_label?(LABEL)
-          action = :pr_push
+          return :pr_push
         else
           PullPreview.logger.info "Unable to find label #{LABEL} on PR##{pr_number}"
           return :ignored
         end
       end
+
       :ignored
     end
 
