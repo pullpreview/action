@@ -35,7 +35,7 @@ module PullPreview
 
         blueprint_id = PullPreview.lightsail.get_blueprints.blueprints.find do |blueprint|
           blueprint.platform == "LINUX_UNIX" &&
-            blueprint.group == "amazon-linux" &&
+            blueprint.group == "amazon_linux_2" &&
             blueprint.is_active &&
             blueprint.type == "os"
         end.blueprint_id
