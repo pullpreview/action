@@ -1,5 +1,9 @@
 ## master
 
+## v5 - updated on 20230110
+
+- Switch to using amazon linux 2 since the old blueprint became unavailable (#34)
+
 ## v5 - updated on 20221108
 
 - Fix pr_push event
