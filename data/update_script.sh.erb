@@ -91,9 +91,6 @@ for i in {1..5}; do
   if pull; then break ; fi
 done
 
-0
-
-
 COMPOSE_HTTP_TIMEOUT=300  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
 	--build \
 	--remove-orphans \
