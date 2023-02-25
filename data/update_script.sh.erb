@@ -68,7 +68,8 @@ echo "Cleaning up..."
 docker volume prune -f || true
 
 echo "Updating dependencies..."
-yum update -y || true
+sudo yum update -y || true
+sudo yum install perl-Digest-SHA -y
 
 if ! /tmp/pre_script.sh ; then
   echo "Failed to run the pre-script"
