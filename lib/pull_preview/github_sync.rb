@@ -66,7 +66,7 @@ module PullPreview
           if instance.running?
             Down.run(name: instance_name)
           end
-          self.class.clear_deployments_for(repo, this_instance_name)
+          clear_deployments_for(repo, this_instance_name)
         end
       end
     end
