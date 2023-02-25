@@ -15,6 +15,7 @@ module PullPreview
       PullPreview.logger.debug "github_event_name = #{github_event_name.inspect}"
 
       if github_event_name == "schedule"
+        clear_expired_deployments(ENV.fetch("GITHUB_REPOSITORY"))
         return clear_dangling_deployments(ENV.fetch("GITHUB_REPOSITORY"))
       end
 
@@ -44,6 +45,29 @@ module PullPreview
           fake_github_context.organization = pr.base.repo.owner
         end
         new(fake_github_context).sync!
+      end
+    end
+
+
+    # Go over pull requests that are labelled pullpreview, and remove the label / tear down the environment
+    # if the PR doesn't also have the pullpreview_keepalive label.
+    def self.clear_expired_deployments(repo)
+      pr_issues = PullPreview.octokit.get("repos/#{repo}/issues", labels: LABEL, pulls: true, state: "all")
+      pr_issues.each do |pr_issue|
+        label_names = pr_issue.labels.map do |label|
+          label.name
+        end
+
+        unless label_names.include?("pullpreview_keepalive")
+          PullPreview.octokit.remove_label(repo, pr_issue.number, "pullpreview")
+          this_instance_name = ["gh", repo_id, "pr", pr_issue.number].join("-")
+          instance = Instance.new(this_instance_name)
+
+          if instance.running?
+            Down.run(name: instance_name)
+          end
+          self.class.clear_deployments_for(repo, this_instance_name)
+        end
       end
     end
 

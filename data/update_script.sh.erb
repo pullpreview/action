@@ -75,6 +75,11 @@ if ! /tmp/pre_script.sh ; then
   exit 1
 fi
 
+# These checksums are ultimately passed as Dockerfile args, which will trigger
+# rebuilds at specific stages when these files change, as opposed to restarting the build from scratch
+
+PACKAGE_LOCK_CHECKSUM=$(shasum app/package-lock.json | awk '{print $1}');
+PRISMA_SCHEMA_CHECKSUM=$(shasum app/packages/kiefa-cultivator/prisma/schema.prisma | awk '{print $1}');
 
 pull() {
   docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
