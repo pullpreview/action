@@ -3,14 +3,18 @@
 set -e
 set -o pipefail
 
-APP_TARBALL="$1"
+#APP_TARBALL="$1"
 APP_PATH="<%= locals.remote_app_path %>"
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
+
+GITHUB_TOKEN="$1"
+GITHUB_REPO="$2"
+GITHUB_SHA="$3"
 
 lock_file="/tmp/update.lock"
 cleanup() {
   rm -f "$lock_file"
-  rm -f "$APP_TARBALL"
+  #rm -f "$APP_TARBALL"
 }
 
 trap cleanup EXIT INT TERM
@@ -57,38 +61,54 @@ set +o allexport
 
 cd /
 
-sudo rm -rf "$APP_PATH"
-sudo mkdir -p "$APP_PATH"
-sudo chown -R ec2-user.ec2-user "$APP_PATH"
-tar xzf "$1" -C "$APP_PATH"
-
-cd "$APP_PATH"
-
-echo "Cleaning up..."
-docker volume prune -f || true
 
 echo "Updating dependencies..."
-yum update -y || true
+sudo yum-config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+sudo yum update -y -q -e 0 || true
+sudo yum install gh perl-Digest-SHA -y -q -e 0
+
+#sudo rm -rf "$APP_PATH"
+#tar xzf "$1" -C "$APP_PATH"
+
+echo "Checking out latest code..."
+
+echo "$GITHUB_TOKEN" > /tmp/github_token
+gh auth login --with-token < /tmp/github_token
+rm -f /tmp/github_token
+
+if [ ! -f $APP_PATH/README.md ]; then
+  echo "Cloning repo..."
+  sudo mkdir -p "$APP_PATH"
+  sudo chown -R ec2-user.ec2-user "$APP_PATH"
+  gh repo clone $GITHUB_REPO "$APP_PATH";
+fi
+
+cd "$APP_PATH"
+gh auth setup-git
+
+REMOTE_REF=$(echo $GITHUB_REF | sed -e  's/refs\//refs\/remotes\//')
+
+git fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +$GITHUB_SHA:$REMOTE_REF
+git checkout $GITHUB_SHA
 
 if ! /tmp/pre_script.sh ; then
   echo "Failed to run the pre-script"
   exit 1
 fi
 
+# These checksums are ultimately passed as Dockerfile args, which will trigger
+# rebuilds at specific stages when these files change, as opposed to restarting the build from scratch
 
-pull() {
-  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
-}
+PACKAGE_LOCK_CHECKSUM=$(shasum $APP_PATH/app/package-lock.json | awk '{print $1}');
+PRISMA_SCHEMA_CHECKSUM=$(shasum $APP_PATH/app/packages/kiefa-cultivator/prisma/schema.prisma | awk '{print $1}');
 
-# pulling images sometimes result in 'unexpected EOF', so retry at most 5 times
-for i in {1..5}; do
-  if pull; then break ; fi
-done
+echo "PACKAGE_LOCK_CHECKSUM IS $PACKAGE_LOCK_CHECKSUM"
+echo "PRISMA_SCHEMA_CHECKSUM IS $PRISMA_SCHEMA_CHECKSUM"
 
-docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
+COMPOSE_HTTP_TIMEOUT=300 PACKAGE_LOCK_CHECKSUM=$(shasum $APP_PATH/app/package-lock.json | awk '{print $1}') PRISMA_SCHEMA_CHECKSUM=$(shasum $APP_PATH/app/packages/kiefa-cultivator/prisma/schema.prisma | awk '{print $1}')  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
 	--build \
 	--remove-orphans \
 	-d
 
 sleep 10
-docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> logs --tail 1000
+docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> logs --tail 10000

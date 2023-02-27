@@ -135,8 +135,16 @@ module PullPreview
       )
     end
 
+    def github_sha
+      ENV.fetch("GITHUB_SHA", "")
+    end
+
     def github_token
       ENV.fetch("GITHUB_TOKEN", "")
+    end
+
+    def github_repository
+      ENV.fetch("GITHUB_REPOSITORY", "")
     end
 
     def github_repository_owner
