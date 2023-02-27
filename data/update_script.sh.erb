@@ -88,7 +88,9 @@ fi
 
 cd "$APP_PATH"
 gh auth setup-git
-git fetch
+REMOTE_REF=$(echo $GITHUB_REF | sed -e  's/refs\//refs\/remotes\//')
+echo "GOT REMOTE REF $REMOTE_REF"
+git fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +$GITHUB_SHA:$REMOTE_REF
 git checkout $GITHUB_SHA
 
 
