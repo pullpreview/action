@@ -87,6 +87,7 @@ if [ ! -f $APP_PATH/README.md ]; then
 fi
 
 cd "$APP_PATH"
+gh auth setup-git
 git fetch
 git checkout $GITHUB_SHA
 
