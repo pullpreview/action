@@ -105,7 +105,7 @@ PRISMA_SCHEMA_CHECKSUM=$(shasum $APP_PATH/app/packages/kiefa-cultivator/prisma/s
 echo "PACKAGE_LOCK_CHECKSUM IS $PACKAGE_LOCK_CHECKSUM"
 echo "PRISMA_SCHEMA_CHECKSUM IS $PRISMA_SCHEMA_CHECKSUM"
 
-COMPOSE_HTTP_TIMEOUT=300  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
+COMPOSE_HTTP_TIMEOUT=300 PACKAGE_LOCK_CHECKSUM=$(shasum $APP_PATH/app/package-lock.json | awk '{print $1}') PRISMA_SCHEMA_CHECKSUM=$(shasum $APP_PATH/app/packages/kiefa-cultivator/prisma/schema.prisma | awk '{print $1}')  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
 	--build \
 	--remove-orphans \
 	-d
