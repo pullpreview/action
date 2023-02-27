@@ -74,6 +74,7 @@ echo "Checking out latest code..."
 
 echo "$GITHUB_TOKEN" > /tmp/github_token
 gh auth login --with-token < /tmp/github_token
+rm -f /tmp/github_token
 
 if [ ! -f $APP_PATH/README.md ]; then
   echo "Cloning repo..."
@@ -101,16 +102,7 @@ fi
 PACKAGE_LOCK_CHECKSUM=$(shasum app/package-lock.json | awk '{print $1}');
 PRISMA_SCHEMA_CHECKSUM=$(shasum app/packages/kiefa-cultivator/prisma/schema.prisma | awk '{print $1}');
 
-pull() {
-  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
-}
-
-# pulling images sometimes result in 'unexpected EOF', so retry at most 5 times
-for i in {1..5}; do
-  if pull; then break ; fi
-done
-
-COMPOSE_HTTP_TIMEOUT=300  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
+COMPOSE_HTTP_TIMEOUT=300  docker-compose --verbose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
 	--build \
 	--remove-orphans \
 	-d
