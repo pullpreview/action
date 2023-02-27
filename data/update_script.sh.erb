@@ -102,7 +102,7 @@ fi
 PACKAGE_LOCK_CHECKSUM=$(shasum app/package-lock.json | awk '{print $1}');
 PRISMA_SCHEMA_CHECKSUM=$(shasum app/packages/kiefa-cultivator/prisma/schema.prisma | awk '{print $1}');
 
-COMPOSE_HTTP_TIMEOUT=300  docker-compose --verbose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
+COMPOSE_HTTP_TIMEOUT=300  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
 	--build \
 	--remove-orphans \
 	-d
