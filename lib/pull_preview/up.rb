@@ -6,24 +6,24 @@ module PullPreview
       PullPreview.logger.debug "options=#{opts.to_hash.inspect}"
       tags = Hash[opts[:tags].map{|tag| tag.split(":", 2)}]
 
-      FileUtils.rm_rf("/tmp/app.tar.gz")
+      #FileUtils.rm_rf("/tmp/app.tar.gz")
 
-      if app_path.start_with?(/^https?/)
-        git_url, ref = app_path.split("#", 2)
-        ref ||= "master"
-        unless system("rm -rf /tmp/app && git clone '#{git_url}' --depth=1 --branch=#{ref} /tmp/app")
-          exit 1
-        end
-        app_path = "/tmp/app"
-      end
+      #if app_path.start_with?(/^https?/)
+      #  git_url, ref = app_path.split("#", 2)
+      #  ref ||= "master"
+      #  unless system("rm -rf /tmp/app && git clone '#{git_url}' --depth=1 --branch=#{ref} /tmp/app")
+      #    exit 1
+      #  end
+      #  app_path = "/tmp/app"
+      #end
 
       aws_region = PullPreview.lightsail.config.region
       instance_name = opts[:name]
 
-      PullPreview.logger.info "Taring up repository at #{app_path.inspect}..."
-      unless system("tar czf /tmp/app.tar.gz --exclude .git -C '#{app_path}' .")
-        exit 1
-      end
+      #PullPreview.logger.info "Taring up repository at #{app_path.inspect}..."
+      #unless system("tar czf /tmp/app.tar.gz --exclude .git -C '#{app_path}' .")
+      #  exit 1
+      #end
 
       instance = Instance.new(instance_name, opts)
 

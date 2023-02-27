@@ -76,8 +76,8 @@ sudo chown -R ec2-user.ec2-user "$APP_PATH"
 #tar xzf "$1" -C "$APP_PATH"
 
 echo "Checking out latest code..."
-
-gh auth login --with-token $GITHUB_TOKEN
+echo "$GITHUB_TOKEN" > /tmp/github_token
+gh auth login --with-token < /tmp/github_token
 
 if [ ! -f $APP_PATH/app ]; then
   gh repo clone $GITHUB_REPO "$APP_PATH";
