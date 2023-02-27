@@ -11,9 +11,6 @@ GITHUB_TOKEN="$1"
 GITHUB_REPO="$2"
 GITHUB_SHA="$3"
 
-echo "GOT REPO $GITHUB_REPO WITH SHA $GITHUB_SHA!"
-env
-
 lock_file="/tmp/update.lock"
 cleanup() {
   rm -f "$lock_file"
@@ -76,25 +73,23 @@ sudo chown -R ec2-user.ec2-user "$APP_PATH"
 #tar xzf "$1" -C "$APP_PATH"
 
 echo "Checking out latest code..."
-echo "APP_PATH IS $APP_PATH"
-echo "TESTING FOR $APP_PATH/README.md..."
+
 echo "$GITHUB_TOKEN" > /tmp/github_token
 gh auth login --with-token < /tmp/github_token
 
 if [ ! -f $APP_PATH/README.md ]; then
-  echo "CHECKING OUT FRESH"
+  echo "Cloning repo..."
   gh repo clone $GITHUB_REPO "$APP_PATH";
 fi
 
 cd "$APP_PATH"
 gh auth setup-git
+
 REMOTE_REF=$(echo $GITHUB_REF | sed -e  's/refs\//refs\/remotes\//')
-echo "GOT REMOTE REF $REMOTE_REF"
+
 git fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +$GITHUB_SHA:$REMOTE_REF
+git reset --hard HEAD
 git checkout $GITHUB_SHA
-
-
-
 
 echo "Cleaning up..."
 docker volume prune -f || true
