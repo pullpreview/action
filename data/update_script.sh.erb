@@ -3,14 +3,19 @@
 set -e
 set -o pipefail
 
-APP_TARBALL="$1"
+#APP_TARBALL="$1"
 APP_PATH="<%= locals.remote_app_path %>"
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
+ #{instance.github_token} #{instance.github_repository} #{instance.github_branch} #{instance.github_sha}
+
+ GITHUB_TOKEN="$1"
+ GITHUB_REPO="$2"
+ GITHUB_SHA="$3"
 
 lock_file="/tmp/update.lock"
 cleanup() {
   rm -f "$lock_file"
-  rm -f "$APP_TARBALL"
+  #rm -f "$APP_TARBALL"
 }
 
 trap cleanup EXIT INT TERM
@@ -57,19 +62,34 @@ set +o allexport
 
 cd /
 
-sudo rm -rf "$APP_PATH"
+
+echo "Updating dependencies..."
+sudo yum-config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+sudo yum update -y -q -e 0 || true
+sudo yum install gh perl-Digest-SHA -y -q -e 0
+
+#sudo rm -rf "$APP_PATH"
 sudo mkdir -p "$APP_PATH"
 sudo chown -R ec2-user.ec2-user "$APP_PATH"
-tar xzf "$1" -C "$APP_PATH"
+#tar xzf "$1" -C "$APP_PATH"
+
+echo "Checking out latest code..."
+
+gh auth login --with-token $GITHUB_TOKEN
+
+if [ ! -f $APP_PATH/app ]; then
+  gh repo clone $GITHUB_REPO "$APP_PATH";
+fi
 
 cd "$APP_PATH"
+git checkout $GITHUB_SHA
+
+
+
 
 echo "Cleaning up..."
 docker volume prune -f || true
 
-echo "Updating dependencies..."
-sudo yum update -y || true
-sudo yum install perl-Digest-SHA -y
 
 if ! /tmp/pre_script.sh ; then
   echo "Failed to run the pre-script"
