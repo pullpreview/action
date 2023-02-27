@@ -8,9 +8,11 @@ APP_PATH="<%= locals.remote_app_path %>"
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
  #{instance.github_token} #{instance.github_repository} #{instance.github_branch} #{instance.github_sha}
 
- GITHUB_TOKEN="$1"
- GITHUB_REPO="$2"
- GITHUB_SHA="$3"
+GITHUB_TOKEN="$1"
+GITHUB_REPO="$2"
+GITHUB_SHA="$3"
+
+echo "GOT TOKEN $GITHUB_TOKEN with REPO $GITHUB_REPO WITH SHA $GITHUB_SHA!"
 
 lock_file="/tmp/update.lock"
 cleanup() {
