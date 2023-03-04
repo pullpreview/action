@@ -19,7 +19,7 @@ jobs:
       - uses: "./"
         with:
           admins: crohr,qbonnard
-          always_on: master
+          always_on: master,v5
           app_path: ./examples/wordpress
           instance_type: micro_2_0
           dns: custom.pullpreview.com
