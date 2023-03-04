@@ -2,6 +2,7 @@
 
 ## v5.1.6 - updated on 20230304
 
+- Update dependency
 - Send basic telemetry
 
 ## v5.1.5 - updated on 20230110
