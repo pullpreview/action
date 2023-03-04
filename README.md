@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v2
-      - uses: pullpreview/action@v6
+      - uses: pullpreview/action@v5
         with:
           # Those GitHub users will have SSH access to the servers
           admins: crohr,other-github-user
