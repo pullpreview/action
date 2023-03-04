@@ -1,5 +1,5 @@
 require "json"
-require 'open-uri'
+require "net/http"
 
 module PullPreview
   class License
@@ -23,18 +23,19 @@ module PullPreview
     def fetch!
       uri = URI("https://app.pullpreview.com/licenses/check")
       uri.query = URI.encode_www_form(params)
-      result = ""
       begin
-        result = open(uri.to_s)
-      rescue StandardError => e
-        result = "OK - License server unreachable"
-      end
-      if result =~ /^OK/
+        response = Net::HTTP.get_response(uri)
+        if response.code == "200"
+          @state = "ok"
+          @message = response.body
+        else
+          @state = "ko"
+          @message = response.body
+        end
+      rescue Exception => e
+        PullPreview.logger.warn "License server unreachable - #{e.message}"
         @state = "ok"
-        @message = result
-      else
-        @state = "ko"
-        @message = result
+        @message = "License server unreachable. Continuing..."
       end
       self
     end
