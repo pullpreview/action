@@ -1,27 +1,31 @@
 ## master
 
-## v5 - updated on 20230110
+## v5.1.6 - updated on 20230304
+
+- Send basic telemetry
+
+## v5.1.5 - updated on 20230110
 
 - Switch to using amazon linux 2 since the old blueprint became unavailable (#34)
 
-## v5 - updated on 20221108
+## v5.1.4 - updated on 20221108
 
 - Fix pr_push event
 
-## v5 - updated on 20221104
+## v5.1.3 - updated on 20221104
 
 - Return :ignored action when no other action can be guessed.
 - Update system packages before running docker-compose.
 - Prune volumes before starting.
 - Add automated cleanup for dangling resources, to be launched as a scheduled job.
 
-## v5 - updated on 20211201
+## v5.1.2 - updated on 20211201
 
 - Fix issue with alpine ruby no longer having the correct ciphers for connecting to lightsail instances.
 - Properly handle `repository_dispatch` events.
 - Add support for private registries, e.g. `registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io` in workflow file.
 
-## v5 - 20210218
+## v5.1.1 - 20210218
 
 - Add support for custom DNS.
 - Switch to human-readable subdomains that include the PR title inside.

@@ -84,8 +84,12 @@ module PullPreview
       end
 
       pp_action = guess_action_from_event.to_sym
-      license = PullPreview::License.new(org_id, repo_id, pp_action).fetch!
+      license = PullPreview::License.new(org_id, repo_id, pp_action, org_slug: org_name, repo_slug: repo_name).fetch!
       PullPreview.logger.info license.message
+
+      unless license.ok?
+        raise LicenseError, license.message
+      end
 
       case pp_action
       when :pr_down, :branch_down
