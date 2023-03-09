@@ -97,7 +97,7 @@ module PullPreview
             "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf",
             "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf",
             "yum install -y docker",
-            %{curl -L "https://github.com/docker/compose/releases/download/2.16.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
+            %{curl -L "https://github.com/docker/compose/releases/download/v2.16.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
             "chmod +x /usr/local/bin/docker-compose",
             "usermod -aG docker ec2-user",
             "service docker start",
