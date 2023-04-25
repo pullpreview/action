@@ -11,7 +11,8 @@ STDERR.sync = true
 
 PullPreview.logger = Logger.new(STDOUT)
 PullPreview.logger.level = Logger.const_get(ENV.fetch("PULLPREVIEW_LOGGER_LEVEL", "INFO"))
-PullPreview.lightsail = Aws::Lightsail::Client.new(region: ENV.fetch("AWS_REGION", "us-east-1"))
+PullPreview.license = ENV.fetch("PULLPREVIEW_LICENSE", "")
+PullPreview.provider = ENV.fetch("PULLPREVIEW_PROVIDER", "lightsail")
 
 common_opts = lambda do |o|
   o.bool '-v', '--verbose', 'Enable verbose mode' do
@@ -36,6 +37,7 @@ up_opts = lambda do |o|
   o.array '--tags', 'Tags to add to the instance'
   o.array '--compose-files', 'Compose files to use when running docker-compose up', default: ["docker-compose.yml"]
 end
+
 
 begin
   case ARGV.shift
@@ -66,8 +68,9 @@ begin
     opts = Slop.parse do |o|
       o.banner = "Usage: pullpreview github-sync path/to/app [options]"
       common_opts.call(o)
-      up_opts.call(o)
+      o.string '--deployment-variant', 'Deployment variant, which allows launching multiple deployments per PR (4 chars max)', default: ""
       o.array '--always-on', 'List of branches to always deploy', default: []
+      up_opts.call(o)
     end
 
     app_path = opts.arguments.first
@@ -80,19 +83,22 @@ begin
   when "console"
     binding.pry
   when "list"
-    PullPreview::List.run(ARGV)
+    opts = Slop.parse do |o|
+      o.banner = "Usage: pullpreview list org/repo [options]"
+      common_opts.call(o)
+      o.string '--org', 'Restrict to given organization name'
+      o.string '--repo', 'Restrict to given repository name'
+    end
+    PullPreview::List.run(opts)
   else
     puts "Usage: pullpreview [up|down|list|console|github-sync] [options]"
     exit 1
   end
-rescue PullPreview::Error => e
+rescue PullPreview::Error, StandardError => e
   puts "Error: #{e.message}"
+  PullPreview.logger.debug e.backtrace.join("\n")
   exit 1
 rescue Slop::Error => e
   puts "CLI Error: #{e.message}"
-  exit 1
-rescue Aws::Lightsail::Errors::ServiceError => e
-  puts "AWS Error: #{e.message}"
-  PullPreview.logger.debug e.backtrace.join("\n")
   exit 1
 end

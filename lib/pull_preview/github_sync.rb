@@ -15,7 +15,7 @@ module PullPreview
       PullPreview.logger.debug "github_event_name = #{github_event_name.inspect}"
 
       if github_event_name == "schedule"
-        return clear_dangling_deployments(ENV.fetch("GITHUB_REPOSITORY"))
+        return clear_dangling_deployments(ENV.fetch("GITHUB_REPOSITORY"), app_path, opts)
       end
 
       github_event_path = ENV.fetch("GITHUB_EVENT_PATH")
@@ -28,7 +28,7 @@ module PullPreview
 
     # Go over closed pull requests that are still labelled as "pullpreview", and force the destroyal of the corresponding environments
     # This happens sometimes, when a pull request is closed, but the environment is not destroyed due to some GitHub Action hiccup.
-    def self.clear_dangling_deployments(repo)
+    def self.clear_dangling_deployments(repo, app_path, opts)
       inactive_pr_issues_still_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: LABEL, pulls: true, state: "closed")
       inactive_pr_issues_still_labeled.each do |pr_issue|
         pr = PullPreview.octokit.get(pr_issue.pull_request.url)
@@ -43,7 +43,7 @@ module PullPreview
         if pr.base.repo.owner.type == "Organization"
           fake_github_context.organization = pr.base.repo.owner
         end
-        new(fake_github_context).sync!
+        new(fake_github_context, app_path, opts).sync!
       end
     end
 
@@ -66,7 +66,7 @@ module PullPreview
       PullPreview.logger.warn "Unable to clear deployments for environment #{environment.inspect}: #{e.message}"
     end
 
-    def initialize(github_context, app_path = nil, opts = {})
+    def initialize(github_context, app_path, opts = {})
       @github_context = github_context
       @app_path = app_path
       @opts = opts
@@ -352,13 +352,20 @@ module PullPreview
       )
     end
 
+    def deployment_variant
+      variant = opts[:deployment_variant].to_s
+      return nil if variant == ""
+      raise Error, "--deployment-variant must be 4 chars max" if variant.size > 4
+      variant
+    end
+
     def instance_name
       @instance_name ||= begin
         name = if pr_number
-          ["gh", repo_id, "pr", pr_number].join("-")
+          ["gh", repo_id, deployment_variant, "pr", pr_number].compact.join("-")
         else
           # push on branch without PR
-          ["gh", repo_id, "branch", branch].join("-")
+          ["gh", repo_id, deployment_variant, "branch", branch].compact.join("-")
         end
         Instance.normalize_name(name)
       end
@@ -367,6 +374,7 @@ module PullPreview
     def instance_subdomain
       @instance_subdomain ||= begin
         components = []
+        components.push(deployment_variant) if deployment_variant
         components.push(*["pr", pr_number]) if pr_number
         components.push(branch)
         Instance.normalize_name(components.join("-"))

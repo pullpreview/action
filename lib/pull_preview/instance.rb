@@ -3,6 +3,8 @@ require "ostruct"
 
 module PullPreview
   class Instance
+    include Utils
+
     attr_reader :admins
     attr_reader :cidrs
     attr_reader :compose_files
@@ -11,7 +13,10 @@ module PullPreview
     attr_reader :name
     attr_reader :subdomain
     attr_reader :ports
+    attr_reader :provider
     attr_reader :registries
+    attr_reader :size
+    attr_reader :access_details
 
     class << self
       attr_accessor :client
@@ -26,6 +31,7 @@ module PullPreview
     end
 
     def initialize(name, opts = {})
+      @provider = PullPreview.provider
       @name = self.class.normalize_name(name)
       @subdomain = opts[:subdomain] || name
       @admins = opts[:admins] || []
@@ -36,11 +42,49 @@ module PullPreview
       @compose_files = opts[:compose_files] || ["docker-compose.yml"]
       @registries = opts[:registries] || []
       @dns = opts[:dns]
+      @size = opts[:instance_type]
       @ssh_results = []
     end
 
-    def remote_app_path
-      REMOTE_APP_PATH
+    def launch_and_wait_until_ready!
+      @access_details = provider.launch!(name, size: size, user_data: user_data, ports: ports, cidrs: cidrs)
+      logger.debug "access_details=#{@access_details.inspect}"
+      logger.info "Instance is running public_ip=#{public_ip} public_dns=#{public_dns}"
+      wait_until_ssh_ready!
+    end
+
+    def terminate!
+      if provider.terminate!(name)
+        logger.info "Instance successfully destroyed"
+      else
+        logger.error "Unable to destroy instance"
+      end
+    end
+
+    def ssh_ready?
+      ssh("test -f /etc/pullpreview/ready")
+    end
+
+    def public_ip
+      access_details.ip_address
+    end
+
+    def public_dns
+      # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
+      remaining_chars_for_subdomain = 62 - dns.size - public_ip.size - "ip".size - ("." * 3).size
+      [
+        [subdomain[0..remaining_chars_for_subdomain], "ip", public_ip.gsub(".", "-")].join("-"),
+        dns
+      ].join(".")
+    end
+
+    def url
+      scheme = (default_port == "443" ? "https" : "http")
+      "#{scheme}://#{public_dns}:#{default_port}"
+    end
+
+    def username
+      provider.username
     end
 
     def ssh_public_keys
@@ -49,79 +93,8 @@ module PullPreview
       end.flatten.reject{|key| key.empty?}
     end
 
-    def success?
-      @ssh_results.map(&:last).all?
-    end
-
-    def running?
-      resp = client.get_instance_state(instance_name: name)
-      resp.state.name == "running"
-    rescue Aws::Lightsail::Errors::NotFoundException
-      @instance_details = nil
-      false
-    end
-
-    def ssh_ready?
-      ssh("test -f /etc/pullpreview/ready")
-    end
-
-    def launch(az, bundle_id, blueprint_id, tags = {})
-      logger.debug "Instance launching ssh_public_keys=#{ssh_public_keys.inspect}"
-
-      params = {
-        instance_names: [name],
-        availability_zone: az,
-        bundle_id: bundle_id,
-        tags: {stack: STACK_NAME}.merge(tags).map{|(k,v)| {key: k.to_s, value: v.to_s}},
-      }
-
-      if latest_snapshot
-        logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
-        logger.info "Creating new instance name=#{name}..."
-        client.create_instances_from_snapshot(params.merge({
-          user_data: [
-            "service docker restart"
-          ].join(" && "),
-          instance_snapshot_name: latest_snapshot.name,
-        }))
-      else
-        logger.info "Creating new instance name=#{name}..."
-        client.create_instances(params.merge({
-          user_data: [
-            %{echo '#{ssh_public_keys.join("\n")}' > /home/ec2-user/.ssh/authorized_keys},
-            "mkdir -p #{REMOTE_APP_PATH} && chown -R ec2-user.ec2-user #{REMOTE_APP_PATH}",
-            "echo 'cd #{REMOTE_APP_PATH}' > /etc/profile.d/pullpreview.sh",
-            "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile",
-            "echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab",
-            "sysctl vm.swappiness=10 && sysctl vm.vfs_cache_pressure=50",
-            "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf",
-            "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf",
-            "yum install -y docker",
-            %{curl -L "https://github.com/docker/compose/releases/download/v2.16.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose},
-            "chmod +x /usr/local/bin/docker-compose",
-            "usermod -aG docker ec2-user",
-            "service docker start",
-            "echo 'docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune",
-            "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
-          ].join(" && "),
-          blueprint_id: blueprint_id
-        }))
-      end
-    end
-
-    def latest_snapshot
-      @latest_snapshot ||= client.get_instance_snapshots.instance_snapshots.sort{|a,b| b.created_at <=> a.created_at}.find do |snap|
-        snap.state == "available" && snap.from_instance_name == name
-      end
-    end
-
-    def destroy!
-      operation = client.delete_instance(instance_name: name).operations.first
-      if operation.error_code.nil?
-        PullPreview.logger.info "Instance successfully destroyed"
-      else
-        raise Error, "An error occurred while destroying the instance: #{operation.error_code} (#{operation.error_details})"
-      end
+    def user_data
+      @user_data ||= UserData.new(app_path: remote_app_path, username: username, ssh_public_keys: ssh_public_keys)
     end
 
     def erb_locals
@@ -155,7 +128,9 @@ module PullPreview
       File.open("/tmp/authorized_keys", "w+") do |f|
         f.write ssh_public_keys.join("\n")
       end
-      scp("/tmp/authorized_keys", "/home/ec2-user/.ssh/authorized_keys", mode: "0600")
+      scp("/tmp/authorized_keys", "/home/#{username}/.ssh/authorized_keys", mode: "0600")
+      # in case provider ssh user is different than the one we want to use
+      ssh("chown #{username}.#{username} /home/#{username}/.ssh/authorized_keys && chmod 0600 /home/#{username}/.ssh/authorized_keys")
     end
 
     def setup_update_script
@@ -198,15 +173,6 @@ module PullPreview
       end
     end
 
-    def wait_until_running!
-      if wait_until { logger.info "Waiting for instance to be running" ; running? }
-        logger.info "Instance is running public_ip=#{public_ip} public_dns=#{public_dns}"
-      else
-        logger.error "Timeout while waiting for instance running"
-        raise Error, "Instance still not running. Aborting."
-      end
-    end
-
     def wait_until_ssh_ready!
       if wait_until { logger.info "Waiting for ssh" ; ssh_ready? }
         logger.info "Instance ssh access OK"
@@ -214,43 +180,6 @@ module PullPreview
         logger.error "Instance ssh access KO"
         raise Error, "Can't connect to instance over SSH. Aborting."
       end
-    end
-
-    def wait_until(max_retries = 30, interval = 5, &block)
-      result = true
-      retries = 0
-      until block.call
-        retries += 1
-        if retries >= max_retries
-          result = false
-          break
-        end
-        sleep interval
-      end
-      result 
-    end
-
-    def open_ports
-      client.put_instance_public_ports({
-        port_infos: ports.map do |port_definition|
-          port_range, protocol = port_definition.split("/", 2)
-          protocol ||= "tcp"
-          port_range_start, port_range_end = port_range.split("-", 2)
-          port_range_end ||= port_range_start
-          cidrs_to_use = cidrs
-          if port_range_start.to_i == 22
-            # allow SSH from anywhere
-            cidrs_to_use = ["0.0.0.0/0"]
-          end
-          {
-            from_port: port_range_start.to_i,
-            to_port: port_range_end.to_i,
-            protocol: protocol, # accepts tcp, all, udp
-            cidrs: cidrs_to_use,
-          }
-        end,
-        instance_name: name
-      })
     end
 
     def scp(source, target, mode: "0644")
@@ -263,11 +192,13 @@ module PullPreview
       File.open(key_file_path, "w+") do |f|
         f.puts access_details.private_key
       end
-      File.open(cert_key_path, "w+") do |f|
-        f.puts access_details.cert_key
+      if access_details.cert_key
+        File.open(cert_key_path, "w+") do |f|
+          f.puts access_details.cert_key
+        end
       end
       [key_file_path].each{|file| FileUtils.chmod 0600, file}
-
+      
       cmd = "ssh #{"-v " if logger.level == Logger::DEBUG}-o ServerAliveInterval=15 -o IdentitiesOnly=yes -i #{key_file_path} #{ssh_address} #{ssh_options.join(" ")} '#{command}'"
       if input && input.respond_to?(:path)
         cmd = "cat #{input.path} | #{cmd}"
@@ -276,30 +207,8 @@ module PullPreview
       system(cmd).tap {|result| @ssh_results.push([cmd, result])}
     end
 
-    def username
-      access_details.username
-    end
-
-    def public_ip
-      access_details.ip_address
-    end
-
-    def public_dns
-      # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
-      remaining_chars_for_subdomain = 62 - dns.size - public_ip.size - "ip".size - ("." * 3).size
-      [
-        [subdomain[0..remaining_chars_for_subdomain], "ip", public_ip.gsub(".", "-")].join("-"),
-        dns
-      ].join(".")
-    end
-
-    def url
-      scheme = (default_port == "443" ? "https" : "http")
-      "#{scheme}://#{public_dns}:#{default_port}"
-    end
-
     def ssh_address
-      [username, public_ip].compact.join("@")
+      access_details.ssh_address
     end
 
     def ssh_options
@@ -311,25 +220,12 @@ module PullPreview
       ]
     end
 
-    def instance_details
-      @instance_details ||= client.get_instance(instance_name: name).instance
-    end
-
-    def access_details
-      @access_details ||= client.get_instance_access_details({
-        instance_name: name,
-        protocol: "ssh", # accepts ssh, rdp
-      }).access_details.tap do |details|
-        logger.debug "access_details=#{details.inspect}"
-      end
-    end
-
-    def client
-      PullPreview.lightsail
-    end
-
-    def logger
+    private def logger
       PullPreview.logger
+    end
+
+    private def remote_app_path
+      REMOTE_APP_PATH
     end
   end
 end

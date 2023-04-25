@@ -18,10 +18,11 @@ jobs:
       - uses: actions/checkout@v2
       - uses: "./"
         with:
-          admins: crohr,qbonnard
+          admins: crohr
           always_on: master,v5
           app_path: ./examples/wordpress
           instance_type: micro_2_0
+          deployment_variant: env1
           dns: custom.pullpreview.com
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
         env:
