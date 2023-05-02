@@ -1,8 +1,11 @@
 require "logger"
 require "fileutils"
-require "aws-sdk-lightsail"
 
+require_relative "./pull_preview/providers"
 require_relative "./pull_preview/error"
+require_relative "./pull_preview/utils"
+require_relative "./pull_preview/user_data"
+require_relative "./pull_preview/access_details"
 require_relative "./pull_preview/instance"
 require_relative "./pull_preview/up"
 require_relative "./pull_preview/down"
@@ -17,7 +20,7 @@ module PullPreview
 
   class << self
     attr_accessor :logger
-    attr_accessor :lightsail
+    attr_reader :license, :provider
   end
 
   def self.data_dir
@@ -35,5 +38,16 @@ module PullPreview
       conn.request(:retry, max: 2)
       conn.request  :url_encoded
     end
+  end
+
+  def self.license=(value)
+    @license = value
+    @license = nil if @license.empty?
+    @license
+  end
+
+  # +value+: one of lightsail,pullpreview
+  def self.provider=(value)
+    @provider = Providers.fetch(value)
   end
 end

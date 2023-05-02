@@ -38,10 +38,22 @@ inputs:
     description: "Compose files to use when running docker-compose up, comma-separated"
     required: false
     default: "docker-compose.yml"
+  license:
+    description: "PullPreview license"
+    required: false
+    default: ""
   instance_type:
     description: "Instance type to use"
     required: false
     default: "small_2_0"
+  deployment_variant:
+    description: "Deployment variant, which allows launching multiple deployments per PR (4 chars max)"
+    required: false
+    default: ""
+  provider:
+    description: "Cloud provider to use: lightsail"
+    required: false
+    default: "lightsail"
   registries:
     description: "Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io"
     required: false
@@ -77,7 +89,11 @@ runs:
     - "${{ inputs.always_on }}"
     - "--instance-type"
     - "${{ inputs.instance_type }}"
+    - "--deployment-variant"
+    - "${{ inputs.deployment_variant }}"
     - "--registries"
     - "${{ inputs.registries }}"
   env:
     GITHUB_TOKEN: "${{ inputs.github_token }}"
+    PULLPREVIEW_LICENSE: "${{ inputs.license }}"
+    PULLPREVIEW_PROVIDER: "${{ inputs.provider }}"

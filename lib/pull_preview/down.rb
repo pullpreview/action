@@ -3,7 +3,7 @@ module PullPreview
     def self.run(opts)
       instance = Instance.new(opts[:name])
       PullPreview.logger.info "Destroying instance name=#{instance.name}"
-      instance.destroy!
+      instance.terminate!
     end
   end
 end
