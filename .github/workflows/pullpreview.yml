@@ -10,7 +10,7 @@ on:
     types: [labeled, unlabeled, synchronize, closed, reopened]
 
 jobs:
-  deploy_env1:
+  deploy:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 30
@@ -22,25 +22,6 @@ jobs:
           always_on: master,v5
           app_path: ./examples/wordpress
           instance_type: micro_2_0
-          deployment_variant: env1
-          dns: custom.pullpreview.com
-          registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
-        env:
-          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-  deploy_env2:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v2
-      - uses: "./"
-        with:
-          admins: crohr
-          always_on: master,v5
-          app_path: ./examples/wordpress
-          instance_type: micro_2_0
-          deployment_variant: env2
           dns: custom.pullpreview.com
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
         env:
