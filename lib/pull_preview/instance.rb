@@ -61,6 +61,10 @@ module PullPreview
       end
     end
 
+    def running?
+      provider.running?(name)
+    end
+
     def ssh_ready?
       ssh("test -f /etc/pullpreview/ready")
     end
