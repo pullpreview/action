@@ -1,5 +1,10 @@
 ## master
 
+## v5.2.0
+
+- Allow `deployment_variant` config, so that one can launch multiple preview deployments per pull request.
+- Refactor code to allow for additional providers.
+
 ## v5.1.6 - updated on 20230304
 
 - Update dependency
