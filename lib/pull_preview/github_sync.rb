@@ -105,7 +105,12 @@ module PullPreview
         end
         if pr_closed?
           PullPreview.logger.info "Removing label #{label} from PR##{pr_number}..."
-          octokit.remove_label(repo, pr_number, label)
+          begin
+            octokit.remove_label(repo, pr_number, label)
+          rescue Octokit::NotFound
+            # ignore errors when removing absent labels
+            true
+          end
         end
         update_github_status(:destroyed)
       when :pr_up, :pr_push, :branch_push
