@@ -137,7 +137,7 @@ module PullPreview
 
       # In case of labeled & unlabeled, we recheck what the PR currently has for
       # labels since actions don't execute in the order they are triggered
-      if (pr_unlabeled? && !pr_has_label?(LABEL)) || (pr_closed? && pr_has_label?(LABEL))
+      if (pr_unlabeled? && !pr_has_label?(LABEL)) || pr_closed?
         return :pr_down
       end
 
