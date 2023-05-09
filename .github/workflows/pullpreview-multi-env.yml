@@ -1,4 +1,4 @@
-name: pullpreview
+name: pullpreview_multi_env
 on:
   schedule:
     - cron: "45 0 * * *"
