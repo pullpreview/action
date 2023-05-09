@@ -189,8 +189,8 @@ module PullPreview
       commit_status = commit_status_for(status)
       # https://developer.github.com/v3/repos/statuses/#create-a-status
       commit_status_params = {
-        context: "PullPreview",
-        description: "Environment #{status.to_s}"
+        context: ["PullPreview", deployment_variant].compact.join(" - "),
+        description: ["Environment", status].join(" ")
       }
       commit_status_params.merge!(target_url: url) if url
       PullPreview.logger.info "Setting commit status for repo=#{repo.inspect}, sha=#{sha.inspect}, status=#{commit_status.inspect}, params=#{commit_status_params.inspect}"
