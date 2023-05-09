@@ -15,7 +15,7 @@ jobs:
       - uses: "./"
         with:
           deployment_variant: env1
-          label: pullpreview-muli-env
+          label: pullpreview-multi-env
           admins: crohr
           app_path: ./examples/wordpress
           instance_type: micro_2_0
@@ -33,7 +33,7 @@ jobs:
       - uses: "./"
         with:
           deployment_variant: env2
-          label: pullpreview-muli-env
+          label: pullpreview-multi-env
           admins: crohr
           app_path: ./examples/wordpress
           instance_type: micro_2_0
