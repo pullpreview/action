@@ -15,6 +15,9 @@ inputs:
   dns:
     description: "Which DNS suffix to use"
     default: "my.pullpreview.com"
+  label:
+    description: "Label to use for triggering preview deployments"
+    default: "pullpreview"
   github_token:
     description: "The personal access token used to update the status of your commit"
     default: "${{ github.token }}"
@@ -81,6 +84,8 @@ runs:
     - "${{ inputs.compose_files }}"
     - "--dns"
     - "${{ inputs.dns }}"
+    - "--label"
+    - "${{ inputs.label }}"
     - "--ports"
     - "${{ inputs.ports }}"
     - "--default-port"
