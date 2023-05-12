@@ -1,5 +1,9 @@
 ## master
 
+## v5.2.2
+
+* Update docker-compose to v2.17.3
+
 ## v5.2.1
 
 * Fix deletion of instance when using deployment variants
