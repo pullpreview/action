@@ -4,11 +4,11 @@ module PullPreview
   class GithubSync
     attr_reader :github_context
     attr_reader :app_path
+
     # CLI options, already parsed
     attr_reader :opts
     attr_reader :always_on
-
-    LABEL = "pullpreview"
+    attr_reader :label
 
     def self.run(app_path, opts)
       github_event_name = ENV.fetch("GITHUB_EVENT_NAME")
@@ -29,10 +29,11 @@ module PullPreview
     # Go over closed pull requests that are still labelled as "pullpreview", and force the destroyal of the corresponding environments
     # This happens sometimes, when a pull request is closed, but the environment is not destroyed due to some GitHub Action hiccup.
     def self.clear_dangling_deployments(repo, app_path, opts)
-      inactive_pr_issues_still_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: LABEL, pulls: true, state: "closed")
+      label = opts[:label]
+      inactive_pr_issues_still_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, pulls: true, state: "closed")
       inactive_pr_issues_still_labeled.each do |pr_issue|
         pr = PullPreview.octokit.get(pr_issue.pull_request.url)
-        PullPreview.logger.warn "Found dangling #{LABEL} label for PR##{pr.number}. Cleaning up..."
+        PullPreview.logger.warn "Found dangling #{label} label for PR##{pr.number}. Cleaning up..."
         fake_github_context = OpenStruct.new(
           action: "closed",
           number: pr.number,
@@ -69,6 +70,7 @@ module PullPreview
     def initialize(github_context, app_path, opts = {})
       @github_context = github_context
       @app_path = app_path
+      @label = opts.delete(:label)
       @opts = opts
       @always_on = opts.delete(:always_on)
     end
@@ -102,8 +104,13 @@ module PullPreview
           PullPreview.logger.warn "Instance #{instance_name.inspect} already down. Continuing..."
         end
         if pr_closed?
-          PullPreview.logger.info "Removing label #{LABEL} from PR##{pr_number}..."
-          octokit.remove_label(repo, pr_number, LABEL)
+          PullPreview.logger.info "Removing label #{label} from PR##{pr_number}..."
+          begin
+            octokit.remove_label(repo, pr_number, label)
+          rescue Octokit::NotFound
+            # ignore errors when removing absent labels
+            true
+          end
         end
         update_github_status(:destroyed)
       when :pr_up, :pr_push, :branch_push
@@ -137,19 +144,19 @@ module PullPreview
 
       # In case of labeled & unlabeled, we recheck what the PR currently has for
       # labels since actions don't execute in the order they are triggered
-      if (pr_unlabeled? && !pr_has_label?(LABEL)) || (pr_closed? && pr_has_label?(LABEL))
+      if (pr_unlabeled? && !pr_has_label?) || pr_closed?
         return :pr_down
       end
 
-      if pr_labeled? && pr_has_label?(LABEL)
+      if pr_labeled? && pr_has_label?
         return :pr_up
       end
 
       if push? || pr_synchronize?
-        if pr_has_label?(LABEL)
+        if pr_has_label?
           return :pr_push
         else
-          PullPreview.logger.info "Unable to find label #{LABEL} on PR##{pr_number}"
+          PullPreview.logger.info "Unable to find label #{label} on PR##{pr_number}"
           return :ignored
         end
       end
@@ -187,8 +194,8 @@ module PullPreview
       commit_status = commit_status_for(status)
       # https://developer.github.com/v3/repos/statuses/#create-a-status
       commit_status_params = {
-        context: "PullPreview",
-        description: "Environment #{status.to_s}"
+        context: ["PullPreview", deployment_variant].compact.join(" - "),
+        description: ["Environment", status].join(" ")
       }
       commit_status_params.merge!(target_url: url) if url
       PullPreview.logger.info "Setting commit status for repo=#{repo.inspect}, sha=#{sha.inspect}, status=#{commit_status.inspect}, params=#{commit_status_params.inspect}"
@@ -313,17 +320,17 @@ module PullPreview
     def pr_labeled?
       pull_request? &&
         github_context["action"] == "labeled" &&
-        github_context["label"]["name"] == LABEL
+        github_context["label"]["name"] == label
     end
 
     def pr_unlabeled?
       pull_request? &&
         github_context["action"] == "unlabeled" &&
-        github_context["label"]["name"] == LABEL
+        github_context["label"]["name"] == label
     end
 
-    def pr_has_label?(searched_label)
-      pr.labels.find{|label| label.name.downcase == searched_label.downcase}
+    def pr_has_label?(searched_label = nil)
+      pr.labels.find{|l| l.name.downcase == (searched_label || label).downcase}
     end
 
     def pr_number

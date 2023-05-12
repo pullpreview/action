@@ -1,0 +1,43 @@
+name: pullpreview_multi_env
+on:
+  schedule:
+    - cron: "45 0 * * *"
+  pull_request:
+    types: [labeled, unlabeled, synchronize, closed, reopened]
+
+jobs:
+  deploy_env1:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview-multi-env' || contains(github.event.pull_request.labels.*.name, 'pullpreview-multi-env')
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v2
+      - uses: "./"
+        with:
+          deployment_variant: env1
+          label: pullpreview-multi-env
+          admins: crohr
+          app_path: ./examples/wordpress
+          instance_type: micro_2_0
+          registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+        env:
+          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+
+  deploy_env2:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview-multi-env' || contains(github.event.pull_request.labels.*.name, 'pullpreview-multi-env')
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v2
+      - uses: "./"
+        with:
+          deployment_variant: env2
+          label: pullpreview-multi-env
+          admins: crohr
+          app_path: ./examples/wordpress
+          instance_type: micro_2_0
+          registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+        env:
+          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"

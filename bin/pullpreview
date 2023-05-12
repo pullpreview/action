@@ -68,8 +68,9 @@ begin
     opts = Slop.parse do |o|
       o.banner = "Usage: pullpreview github-sync path/to/app [options]"
       common_opts.call(o)
-      o.string '--deployment-variant', 'Deployment variant, which allows launching multiple deployments per PR (4 chars max)', default: ""
       o.array '--always-on', 'List of branches to always deploy', default: []
+      o.string '--deployment-variant', 'Deployment variant, which allows launching multiple deployments per PR (4 chars max)', default: ""
+      o.string '--label', 'Label to use for triggering preview deployments', default: "pullpreview"
       up_opts.call(o)
     end
 
