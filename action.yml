@@ -1,5 +1,5 @@
 name: "PullPreview - Preview deployments made simple"
-description: "If your app can be launched from docker compose, you can get automated preview deployments for your pull requests up and running in your own AWS account in less than 1h. Then simply add the pullpreview label to one of your PRs, and watch the magic happen."
+description: "Get automated preview deployments of your app for every pull request. Docker Compose => GitHub Action => your AWS account."
 author: "Cyril Rohr"
 branding:
   icon: anchor
