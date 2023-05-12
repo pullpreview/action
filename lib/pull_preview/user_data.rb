@@ -21,7 +21,7 @@ module PullPreview
       result << "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf"
       result << "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf"
       result << "yum install -y docker"
-      result << %{curl -L "https://github.com/docker/compose/releases/download/v2.16.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose}
+      result << %{curl -L "https://github.com/docker/compose/releases/download/v2.17.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose}
       result << "chmod +x /usr/local/bin/docker-compose"
       result << "usermod -aG docker #{username}"
       result << "service docker restart"
