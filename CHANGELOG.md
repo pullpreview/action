@@ -1,5 +1,13 @@
 ## master
 
+## v5.2.1
+
+* Fix deletion of instance when using deployment variants
+* Allow to pass label as input
+* Fix status messages when multi envs
+* Ignore errors when removing absent labels
+* Additional workflow for testing multi envs
+
 ## v5.2.0
 
 - Allow `deployment_variant` config, so that one can launch multiple preview deployments per pull request.
