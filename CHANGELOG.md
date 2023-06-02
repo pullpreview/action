@@ -1,5 +1,9 @@
 ## master
 
+## v5.2.3
+
+* Update docker-compose to v2.18.1
+
 ## v5.2.2
 
 * Update docker-compose to v2.17.3
