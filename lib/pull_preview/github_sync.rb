@@ -26,7 +26,7 @@ module PullPreview
       self.new(github_context, app_path, opts).sync!
     end
 
-    # Go over closed pull requests that are still labelled as "pullpreview", and force the destroyal of the corresponding environments
+    # Go over closed pull requests that are still labelled as "pullpreview", and force the removal of the corresponding environments
     # This happens sometimes, when a pull request is closed, but the environment is not destroyed due to some GitHub Action hiccup.
     def self.clear_dangling_deployments(repo, app_path, opts)
       label = opts[:label]
