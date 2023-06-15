@@ -10,7 +10,7 @@ STDOUT.sync = true
 STDERR.sync = true
 
 PullPreview.logger = Logger.new(STDOUT)
-PullPreview.logger.level = Logger.const_get(ENV.fetch("PULLPREVIEW_LOGGER_LEVEL", "INFO"))
+PullPreview.logger.level = Logger.const_get(ENV.fetch("PULLPREVIEW_LOGGER_LEVEL", "INFO").upcase)
 PullPreview.license = ENV.fetch("PULLPREVIEW_LICENSE", "")
 PullPreview.provider = ENV.fetch("PULLPREVIEW_PROVIDER", "lightsail")
 
