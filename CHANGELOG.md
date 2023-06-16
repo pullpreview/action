@@ -1,5 +1,9 @@
 ## master
 
+## v5.2.4
+
+* Pin to specific ruby image because most recent ruby ships with openssh v9, which is incompatible with openssh v7 on the AWS AMIs.
+
 ## v5.2.3
 
 * Update docker-compose to v2.18.1
