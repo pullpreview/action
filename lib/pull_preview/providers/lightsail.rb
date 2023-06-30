@@ -6,13 +6,13 @@ module PullPreview
       attr_reader :client
 
       SIZES = {
-        "XXS" => "nano_2_0",
-        "XS" => "micro_2_0",
-        "S" => "small_2_0",
-        "M" => "medium_2_0",
-        "L" => "large_2_0",
-        "XL" => "xlarge_2_0",
-        "2XL" => "2xlarge_2_0",
+        "XXS" => "nano",
+        "XS" => "micro",
+        "S" => "small",
+        "M" => "medium",
+        "L" => "large",
+        "XL" => "xlarge",
+        "2XL" => "2xlarge",
       }
 
       def initialize
@@ -159,14 +159,14 @@ module PullPreview
       end
 
       def bundle_id(size = "M")
-        instance_type = SIZES.fetch(size, size)
+        instance_type = SIZES.fetch(size, size.sub("_2_0", ""))
         bundle_id = client.get_bundles.bundles.find do |bundle|
           if instance_type.nil? || instance_type.empty?
             bundle.cpu_count >= 1 &&
               (2..3).include?(bundle.ram_size_in_gb) &&
               bundle.supported_platforms.include?("LINUX_UNIX")
           else
-            bundle.bundle_id == instance_type
+            bundle.instance_type == instance_type
           end
         end.bundle_id
       end

@@ -48,7 +48,7 @@ inputs:
   instance_type:
     description: "Instance type to use"
     required: false
-    default: "small_2_0"
+    default: "small"
   deployment_variant:
     description: "Deployment variant, which allows launching multiple deployments per PR (4 chars max)"
     required: false
