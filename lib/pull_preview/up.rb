@@ -3,6 +3,9 @@ require "open-uri"
 module PullPreview
   class Up
     def self.run(app_path, opts)
+      STDOUT.sync = true
+      STDERR.sync = true
+
       PullPreview.logger.debug "options=#{opts.to_hash.inspect}"
       tags = Hash[opts[:tags].map{|tag| tag.split(":", 2)}]
 

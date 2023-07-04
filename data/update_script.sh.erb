@@ -8,9 +8,18 @@ APP_PATH="<%= locals.remote_app_path %>"
 PULLPREVIEW_ENV_FILE="/etc/pullpreview/env"
 
 lock_file="/tmp/update.lock"
-cleanup() {
+
+lock_cleanup() {
   rm -f "$lock_file"
+}
+
+app_cleanup() {
   rm -f "$APP_TARBALL"
+}
+
+cleanup() {
+  lock_cleanup
+  app_cleanup
 }
 
 trap cleanup EXIT INT TERM
@@ -68,7 +77,7 @@ echo "Cleaning up..."
 docker volume prune -f || true
 
 echo "Updating dependencies..."
-yum update -y || true
+sudo yum update -y || true
 
 if ! /tmp/pre_script.sh ; then
   echo "Failed to run the pre-script"
