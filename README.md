@@ -2,6 +2,8 @@
 
 A GitHub Action that starts live environments for your pull requests and branches.
 
+[![pullpreview](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml/badge.svg)](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml)
+
 ## Spin environments in one click
 
 Once installed in your repository, this action is triggered any time a change
