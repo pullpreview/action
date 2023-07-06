@@ -11,6 +11,7 @@ on:
 
 jobs:
   deploy:
+    concurrency: ${{ github.ref }}
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 30
