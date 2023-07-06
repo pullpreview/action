@@ -7,7 +7,7 @@ module PullPreview
       STDERR.sync = true
 
       PullPreview.logger.debug "options=#{opts.to_hash.inspect}"
-      tags = Hash[opts[:tags].map{|tag| tag.split(":", 2)}]
+      opts[:tags] = Hash[opts[:tags].map{|tag| tag.split(":", 2)}]
 
       FileUtils.rm_rf("/tmp/app.tar.gz")
 
