@@ -16,6 +16,7 @@ module PullPreview
     attr_reader :provider
     attr_reader :registries
     attr_reader :size
+    attr_reader :tags
     attr_reader :access_details
 
     class << self
@@ -44,10 +45,11 @@ module PullPreview
       @dns = opts[:dns]
       @size = opts[:instance_type]
       @ssh_results = []
+      @tags = opts[:tags] || {}
     end
 
     def launch_and_wait_until_ready!
-      @access_details = provider.launch!(name, size: size, user_data: user_data, ports: ports, cidrs: cidrs)
+      @access_details = provider.launch!(name, size: size, user_data: user_data, ports: ports, cidrs: cidrs, tags: tags)
       logger.debug "access_details=#{@access_details.inspect}"
       logger.info "Instance is running public_ip=#{public_ip} public_dns=#{public_dns}"
       wait_until_ssh_ready!

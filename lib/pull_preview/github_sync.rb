@@ -29,8 +29,10 @@ module PullPreview
     # Go over closed pull requests that are still labelled as "pullpreview", and force the removal of the corresponding environments
     # This happens sometimes, when a pull request is closed, but the environment is not destroyed due to some GitHub Action hiccup.
     def self.clear_dangling_deployments(repo, app_path, opts)
+      PullPreview.logger.info "[clear_dangling_deployments] start"
       label = opts[:label]
       inactive_pr_issues_still_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, pulls: true, state: "closed")
+      PullPreview.logger.info "[clear_dangling_deployments] found #{inactive_pr_issues_still_labeled.size} closed PRs still labeled with #{label}"
       inactive_pr_issues_still_labeled.each do |pr_issue|
         pr = PullPreview.octokit.get(pr_issue.pull_request.url)
         PullPreview.logger.warn "Found dangling #{label} label for PR##{pr.number}. Cleaning up..."
@@ -46,6 +48,7 @@ module PullPreview
         end
         new(fake_github_context, app_path, opts).sync!
       end
+      PullPreview.logger.info "[clear_dangling_deployments] end"
     end
 
     def self.clear_deployments_for(repo, environment, force: false)
