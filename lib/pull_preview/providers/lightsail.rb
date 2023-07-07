@@ -1,18 +1,14 @@
 module PullPreview
   module Providers
-    class Lightsail
-      include Utils
-
-      attr_reader :client
-
+    class Lightsail < Base
       SIZES = {
-        "XXS" => "nano",
-        "XS" => "micro",
-        "S" => "small",
-        "M" => "medium",
-        "L" => "large",
-        "XL" => "xlarge",
-        "2XL" => "2xlarge",
+        "nano" => "nano",
+        "micro" => "micro",
+        "small" => "small",
+        "medium" => "medium",
+        "large" => "large",
+        "xlarge" => "xlarge",
+        "2xlarge" => "2xlarge",
       }
 
       def initialize
@@ -47,39 +43,6 @@ module PullPreview
         fetch_access_details(name)
       end
 
-      def launch_or_restore_from_snapshot(name, user_data:, size:, ssh_public_keys: [], tags: {})
-        params = {
-          instance_names: [name],
-          availability_zone: availability_zones.first,
-          bundle_id: bundle_id(size),
-          tags: {stack: PullPreview::STACK_NAME}.merge(tags).map{|(k,v)| {key: k.to_s, value: v.to_s}},
-        }
-
-        if latest_snapshot(name)
-          logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
-          logger.info "Creating new instance name=#{name}..."
-          client.create_instances_from_snapshot(params.merge({
-            user_data: user_data.to_s,
-            instance_snapshot_name: latest_snapshot.name,
-          }))
-        else
-          logger.info "Creating new instance name=#{name}..."
-          client.create_instances(params.merge({
-            user_data: user_data.to_s,
-            blueprint_id: blueprint_id
-          }))
-        end
-      end
-
-      def wait_until_running!(name)
-        if wait_until { logger.info "Waiting for instance to be running" ; running?(name) }
-          logger.debug "Instance is running"
-        else
-          logger.error "Timeout while waiting for instance running"
-          raise Error, "Instance still not running. Aborting."
-        end
-      end
-
       def setup_firewall(name, cidrs: [], ports: [])
         client.put_instance_public_ports({
           port_infos: ports.map do |port_definition|
@@ -111,12 +74,6 @@ module PullPreview
         AccessDetails.new(username: result.username, ip_address: result.ip_address, cert_key: result.cert_key, private_key: result.private_key)
       end
 
-      def latest_snapshot(name)
-        client.get_instance_snapshots.instance_snapshots.sort{|a,b| b.created_at <=> a.created_at}.find do |snap|
-          snap.state == "available" && snap.from_instance_name == name
-        end
-      end
-
       def list_instances(tags: {})
         next_page_token = nil
         begin
@@ -139,13 +96,43 @@ module PullPreview
         end while not next_page_token.nil?
       end
 
-      def availability_zones
+      private def launch_or_restore_from_snapshot(name, user_data:, size:, ssh_public_keys: [], tags: {})
+        params = {
+          instance_names: [name],
+          availability_zone: availability_zones.first,
+          bundle_id: bundle_id(size),
+          tags: {stack: PullPreview::STACK_NAME}.merge(tags).map{|(k,v)| {key: k.to_s, value: v.to_s}},
+        }
+
+        if latest_snapshot(name)
+          logger.info "Found snapshot to restore from: #{latest_snapshot.name}"
+          logger.info "Creating new instance name=#{name}..."
+          client.create_instances_from_snapshot(params.merge({
+            user_data: user_data.to_s,
+            instance_snapshot_name: latest_snapshot.name,
+          }))
+        else
+          logger.info "Creating new instance name=#{name}..."
+          client.create_instances(params.merge({
+            user_data: user_data.to_s,
+            blueprint_id: blueprint_id
+          }))
+        end
+      end
+
+      private def latest_snapshot(name)
+        client.get_instance_snapshots.instance_snapshots.sort{|a,b| b.created_at <=> a.created_at}.find do |snap|
+          snap.state == "available" && snap.from_instance_name == name
+        end
+      end
+
+      private def availability_zones
         azs = client.get_regions(include_availability_zones: true).regions.find do |region|
           region.name == @aws_region
         end.availability_zones.map(&:zone_name)
       end
 
-      def blueprint_id
+      private def blueprint_id
         blueprint_id = client.get_blueprints.blueprints.find do |blueprint|
           blueprint.platform == "LINUX_UNIX" &&
             blueprint.group == "amazon_linux_2" &&
@@ -154,11 +141,7 @@ module PullPreview
         end.blueprint_id
       end
 
-      def username
-        "ec2-user"
-      end
-
-      def bundle_id(size = "M")
+      private def bundle_id(size = "medium")
         instance_type = SIZES.fetch(size, size.sub("_2_0", ""))
         bundle_id = client.get_bundles.bundles.find do |bundle|
           if instance_type.nil? || instance_type.empty?
@@ -169,14 +152,6 @@ module PullPreview
             bundle.instance_type == instance_type
           end
         end.bundle_id
-      end
-
-      private def remote_app_path
-        PullPreview::REMOTE_APP_PATH
-      end
-
-      private def logger
-        PullPreview.logger
       end
     end
   end
