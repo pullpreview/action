@@ -1,5 +1,12 @@
 ## master
 
+## v5.2.5
+
+- Add possibility to auto-stop deploymnents after a while (#48)
+- Add concurrency to workflow
+- Fix tags (#47)
+- Fix bundle selection
+
 ## v5.2.4
 
 * Pin to specific ruby image because most recent ruby ships with openssh v9, which is incompatible with openssh v7 on the AWS AMIs.
