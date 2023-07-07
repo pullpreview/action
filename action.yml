@@ -61,6 +61,10 @@ inputs:
     description: "Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io"
     required: false
     default: ""
+  ttl:
+    description: "Maximum time to live for deployments (e.g. 10h, 5d, infinite)"
+    required: false
+    default: "infinite"
 
 outputs:
   url:
@@ -98,6 +102,8 @@ runs:
     - "${{ inputs.deployment_variant }}"
     - "--registries"
     - "${{ inputs.registries }}"
+    - "--ttl"
+    - "${{ inputs.ttl }}"
   env:
     GITHUB_TOKEN: "${{ inputs.github_token }}"
     PULLPREVIEW_LICENSE: "${{ inputs.license }}"

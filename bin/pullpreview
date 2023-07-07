@@ -71,6 +71,7 @@ begin
       o.array '--always-on', 'List of branches to always deploy', default: []
       o.string '--deployment-variant', 'Deployment variant, which allows launching multiple deployments per PR (4 chars max)', default: ""
       o.string '--label', 'Label to use for triggering preview deployments', default: "pullpreview"
+      o.string '--ttl', 'Maximum time to live for deployments (e.g. 10h, 5d, infinite)', default: "infinite"
       up_opts.call(o)
     end
 
