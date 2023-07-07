@@ -64,7 +64,7 @@ module PullPreview
           PullPreview.logger.warn "[clear_dangling_deployments] Found #{label} label for active PR##{pr.number} (#{pr_issue.updated_at}). Not touching."
           next
         end
-        # new(fake_github_context, app_path, opts).sync!
+        new(fake_github_context, app_path, opts).sync!
       end
 
       PullPreview.logger.info "[clear_dangling_deployments] end"
