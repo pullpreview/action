@@ -1,7 +1,7 @@
 name: pullpreview
 on:
   schedule:
-    - cron: "30 * * * *"
+    - cron: "30 */4 * * *"
   push:
     branches:
       - master
