@@ -1,7 +1,7 @@
 name: pullpreview
 on:
   schedule:
-    - cron: "30 0 * * *"
+    - cron: "30 * * * *"
   push:
     branches:
       - master
@@ -9,9 +9,10 @@ on:
   pull_request:
     types: [labeled, unlabeled, synchronize, closed, reopened]
 
+concurrency: ${{ github.ref }}
+
 jobs:
   deploy:
-    concurrency: ${{ github.ref }}
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 30
@@ -25,6 +26,7 @@ jobs:
           instance_type: micro_2_0
           dns: custom.pullpreview.com
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+          ttl: 1h
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"

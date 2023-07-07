@@ -26,16 +26,26 @@ module PullPreview
       self.new(github_context, app_path, opts).sync!
     end
 
+    def self.pr_expired?(last_updated_at, ttl)
+      ttl = ttl.to_s
+      if ttl.end_with?("h")
+        return last_updated_at <= Time.now - ttl.sub("h", "").to_i * 3600
+      elsif ttl.end_with?("d")
+        return last_updated_at <= Time.now - ttl.sub("d", "").to_i * 3600 * 24
+      else
+        false
+      end
+    end
+
     # Go over closed pull requests that are still labelled as "pullpreview", and force the removal of the corresponding environments
     # This happens sometimes, when a pull request is closed, but the environment is not destroyed due to some GitHub Action hiccup.
     def self.clear_dangling_deployments(repo, app_path, opts)
+      ttl = opts[:ttl] || "infinite"
       PullPreview.logger.info "[clear_dangling_deployments] start"
       label = opts[:label]
-      inactive_pr_issues_still_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, pulls: true, state: "closed")
-      PullPreview.logger.info "[clear_dangling_deployments] found #{inactive_pr_issues_still_labeled.size} closed PRs still labeled with #{label}"
-      inactive_pr_issues_still_labeled.each do |pr_issue|
+      pr_issues_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, pulls: true, state: "all", per_page: 100)
+      pr_issues_labeled.each do |pr_issue|
         pr = PullPreview.octokit.get(pr_issue.pull_request.url)
-        PullPreview.logger.warn "Found dangling #{label} label for PR##{pr.number}. Cleaning up..."
         fake_github_context = OpenStruct.new(
           action: "closed",
           number: pr.number,
@@ -46,8 +56,17 @@ module PullPreview
         if pr.base.repo.owner.type == "Organization"
           fake_github_context.organization = pr.base.repo.owner
         end
-        new(fake_github_context, app_path, opts).sync!
+        if pr_issue.state == "closed"
+          PullPreview.logger.warn "[clear_dangling_deployments] Found dangling #{label} label for PR##{pr.number}. Cleaning up..."
+        elsif pr_expired?(pr_issue.updated_at, ttl)
+          PullPreview.logger.warn "[clear_dangling_deployments] Found #{label} label for expired PR##{pr.number} (#{pr_issue.updated_at}). Cleaning up..."
+        else
+          PullPreview.logger.warn "[clear_dangling_deployments] Found #{label} label for active PR##{pr.number} (#{pr_issue.updated_at}). Not touching."
+          next
+        end
+        # new(fake_github_context, app_path, opts).sync!
       end
+
       PullPreview.logger.info "[clear_dangling_deployments] end"
     end
 
