@@ -148,7 +148,7 @@ module PullPreview
       def blueprint_id
         blueprint_id = client.get_blueprints.blueprints.find do |blueprint|
           blueprint.platform == "LINUX_UNIX" &&
-            blueprint.group == "amazon_linux_2" &&
+            blueprint.group == "amazon_linux_2023" &&
             blueprint.is_active &&
             blueprint.type == "os"
         end.blueprint_id
