@@ -1,5 +1,9 @@
 ## master
 
+## v5.3.0
+
+- Switch to Amazon Linux 2023 to fix issue with outdated OpenSSH server
+
 ## v5.2.5
 
 - Add possibility to auto-stop deploymnents after a while (#48)
