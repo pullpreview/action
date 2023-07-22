@@ -33,45 +33,14 @@ module PullPreview
         end
       end
 
-      def launch!(name, size:, ssh_public_keys: [], user_data: UserData.new, cidrs: [], ports: [], tags: {})
+      def launch!(name, size:, user_data: UserData.new, cidrs: [], ports: [], tags: {})
         unless running?(name)
-          launch_or_restore_from_snapshot(name, user_data: user_data, size: size, ssh_public_keys: ssh_public_keys, tags: tags)
+          launch_or_restore_from_snapshot(name, user_data: user_data, size: size, tags: tags)
           sleep 2
           wait_until_running!(name)
         end
         setup_firewall(name, cidrs: cidrs, ports: ports)
         fetch_access_details(name)
-      end
-
-      def setup_firewall(name, cidrs: [], ports: [])
-        client.put_instance_public_ports({
-          port_infos: ports.map do |port_definition|
-            port_range, protocol = port_definition.split("/", 2)
-            protocol ||= "tcp"
-            port_range_start, port_range_end = port_range.split("-", 2)
-            port_range_end ||= port_range_start
-            cidrs_to_use = cidrs
-            if port_range_start.to_i == 22
-              # allow SSH from anywhere
-              cidrs_to_use = ["0.0.0.0/0"]
-            end
-            {
-              from_port: port_range_start.to_i,
-              to_port: port_range_end.to_i,
-              protocol: protocol, # accepts tcp, all, udp
-              cidrs: cidrs_to_use,
-            }
-          end,
-          instance_name: name
-        })
-      end
-
-      def fetch_access_details(name)
-        result = client.get_instance_access_details({
-          instance_name: name,
-          protocol: "ssh", # accepts ssh, rdp
-        }).access_details
-        AccessDetails.new(username: result.username, ip_address: result.ip_address, cert_key: result.cert_key, private_key: result.private_key)
       end
 
       def list_instances(tags: {})
@@ -96,7 +65,38 @@ module PullPreview
         end while not next_page_token.nil?
       end
 
-      private def launch_or_restore_from_snapshot(name, user_data:, size:, ssh_public_keys: [], tags: {})
+      private def setup_firewall(name, cidrs: [], ports: [])
+        client.put_instance_public_ports({
+          port_infos: ports.map do |port_definition|
+            port_range, protocol = port_definition.split("/", 2)
+            protocol ||= "tcp"
+            port_range_start, port_range_end = port_range.split("-", 2)
+            port_range_end ||= port_range_start
+            cidrs_to_use = cidrs
+            if port_range_start.to_i == 22
+              # allow SSH from anywhere
+              cidrs_to_use = ["0.0.0.0/0"]
+            end
+            {
+              from_port: port_range_start.to_i,
+              to_port: port_range_end.to_i,
+              protocol: protocol, # accepts tcp, all, udp
+              cidrs: cidrs_to_use,
+            }
+          end,
+          instance_name: name
+        })
+      end
+
+      private def fetch_access_details(name)
+        result = client.get_instance_access_details({
+          instance_name: name,
+          protocol: "ssh", # accepts ssh, rdp
+        }).access_details
+        AccessDetails.new(username: result.username, ip_address: result.ip_address, cert_key: result.cert_key, private_key: result.private_key)
+      end
+
+      private def launch_or_restore_from_snapshot(name, user_data:, size:, tags: {})
         params = {
           instance_names: [name],
           availability_zone: availability_zones.first,

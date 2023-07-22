@@ -17,15 +17,7 @@ module PullPreview
         raise NotImplementedError
       end
 
-      def launch!(name, size:, ssh_public_keys: [], user_data: UserData.new, cidrs: [], ports: [], tags: {})
-        raise NotImplementedError
-      end
-
-      def setup_firewall(name, cidrs: [], ports: [])
-        raise NotImplementedError
-      end
-
-      def fetch_access_details(name)
+      def launch!(name, size:, user_data: UserData.new, cidrs: [], ports: [], tags: {})
         raise NotImplementedError
       end
 

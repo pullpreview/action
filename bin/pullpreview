@@ -12,7 +12,6 @@ STDERR.sync = true
 PullPreview.logger = Logger.new(STDOUT)
 PullPreview.logger.level = Logger.const_get(ENV.fetch("PULLPREVIEW_LOGGER_LEVEL", "INFO").upcase)
 PullPreview.license = ENV.fetch("PULLPREVIEW_LICENSE", "")
-PullPreview.provider = ENV.fetch("PULLPREVIEW_PROVIDER", "lightsail")
 
 common_opts = lambda do |o|
   o.bool '-v', '--verbose', 'Enable verbose mode' do
@@ -37,7 +36,6 @@ up_opts = lambda do |o|
   o.array '--tags', 'Tags to add to the instance'
   o.array '--compose-files', 'Compose files to use when running docker-compose up', default: ["docker-compose.yml"]
 end
-
 
 begin
   case ARGV.shift

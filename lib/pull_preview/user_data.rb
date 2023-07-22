@@ -11,8 +11,8 @@ module PullPreview
     def instructions
       result = []
       result << "#!/bin/bash -xe"
-      if ssh_public_keys.any?
-        result << %{echo '#{ssh_public_keys.join("\n")}' > /home/#{username}/.ssh/authorized_keys}
+      ssh_public_keys.each do |ssh_public_key|
+        result << %{echo '#{ssh_public_keys}' >> /home/#{username}/.ssh/authorized_keys}
       end
       result << "mkdir -p #{app_path} && chown -R #{username}.#{username} #{app_path}"
       result << "echo 'cd #{app_path}' > /etc/profile.d/pullpreview.sh"
@@ -20,12 +20,12 @@ module PullPreview
       result << "sysctl vm.swappiness=10 && sysctl vm.vfs_cache_pressure=50"
       result << "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf"
       result << "echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf"
-      result << "yum install -y docker"
-      result << %{curl -L "https://github.com/docker/compose/releases/download/v2.18.1/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose}
+      result << "curl -fsSL https://get.docker.com -o - | sh"
+      result << "systemctl restart docker"
+      result << %{echo -e '#!/bin/sh\nexec docker compose "$@"' > /usr/local/bin/docker-compose}
       result << "chmod +x /usr/local/bin/docker-compose"
       result << "usermod -aG docker #{username}"
-      result << "service docker restart"
-      result << "echo 'docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune"
+      result << "echo 'docker image prune -a --filter=\"until=72h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune"
       result << "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R #{username}.#{username} /etc/pullpreview"
       result
     end

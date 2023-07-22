@@ -1,3 +1,5 @@
+require_relative "providers/base"
+
 module PullPreview
   module Providers
     def self.fetch(name)

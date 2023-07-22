@@ -21,7 +21,8 @@ module PullPreview
     end
 
     def fetch!
-      uri = URI("https://app.pullpreview.com/licenses/check")
+      uri = PullPreview.api_uri.dup
+      uri.path = "/licenses/check"
       uri.query = URI.encode_www_form(params)
       begin
         response = Net::HTTP.get_response(uri)
