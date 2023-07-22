@@ -54,7 +54,7 @@ inputs:
     required: false
     default: ""
   provider:
-    description: "Cloud provider to use: lightsail"
+    description: "Cloud provider to use: lightsail,hosted"
     required: false
     default: "lightsail"
   registries:

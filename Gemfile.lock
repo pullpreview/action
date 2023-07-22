@@ -41,10 +41,11 @@ PLATFORMS
 
 DEPENDENCIES
   aws-sdk-lightsail
+  faraday
   octokit
   pry
   slop
   terminal-table
 
 BUNDLED WITH
-   2.1.4
+   2.2.22

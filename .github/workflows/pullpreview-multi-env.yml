@@ -20,6 +20,7 @@ jobs:
           app_path: ./examples/wordpress
           instance_type: micro_2_0
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+          ttl: 1h
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
@@ -38,6 +39,7 @@ jobs:
           app_path: ./examples/wordpress
           instance_type: micro_2_0
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+          ttl: 1h
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"

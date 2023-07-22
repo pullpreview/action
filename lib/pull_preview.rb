@@ -1,7 +1,6 @@
 require "logger"
 require "fileutils"
 
-require_relative "./pull_preview/providers"
 require_relative "./pull_preview/error"
 require_relative "./pull_preview/utils"
 require_relative "./pull_preview/user_data"
@@ -20,7 +19,11 @@ module PullPreview
 
   class << self
     attr_accessor :logger
-    attr_reader :license, :provider
+    attr_reader :license
+  end
+
+  def self.api_uri
+    URI(ENV.fetch("PULLPREVIEW_API_URL", "https://app.pullpreview.com"))
   end
 
   def self.data_dir
@@ -46,8 +49,13 @@ module PullPreview
     @license
   end
 
-  # +value+: one of lightsail,pullpreview
-  def self.provider=(value)
-    @provider = Providers.fetch(value)
+  def self.provider
+    return @provider if defined?(@provider)
+    provider_name = ENV.fetch("PULLPREVIEW_PROVIDER", "lightsail")
+    if PullPreview.license && ENV.keys.none? { |k| k.start_with?("AWS_") }
+      provider_name = "hosted"
+    end
+    require_relative "./pull_preview/providers"
+    @provider = Providers.fetch(provider_name)
   end
 end
