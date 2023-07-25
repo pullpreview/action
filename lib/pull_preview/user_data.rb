@@ -10,7 +10,8 @@ module PullPreview
 
     def instructions
       result = []
-      result << "#!/bin/bash -xe"
+      result << "#!/bin/bash"
+      result << "set -xe ; set -o pipefail"
       if ssh_public_keys.any?
         result << %{echo '#{ssh_public_keys.join("\n")}' > /home/#{username}/.ssh/authorized_keys}
       end
@@ -19,8 +20,8 @@ module PullPreview
       result << "test -s /swapfile || ( fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab )"
 
       # for Amazon Linux 2023, which by default creates a /tmp mount that is too small
-      result << "systemctl disable --now tmp.mount || true"
-      result << "umount /tmp || true"
+      result << "systemctl disable --now tmp.mount"
+      result << "systemctl mask tmp.mount"
 
       result << "sysctl vm.swappiness=10 && sysctl vm.vfs_cache_pressure=50"
       result << "echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf"
