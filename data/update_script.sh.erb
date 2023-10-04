@@ -96,6 +96,7 @@ done
 
 docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
 	--build \
+	--wait \
 	--remove-orphans \
 	-d
 
