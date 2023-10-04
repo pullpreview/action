@@ -11,6 +11,12 @@ on:
 
 concurrency: ${{ github.ref }}
 
+permissions:
+  contents: read # to fetch code (actions/checkout)
+  deployments: write # to delete deployments
+  pull-requests: write # to remove labels
+  statuses: write # to create commit status
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
