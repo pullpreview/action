@@ -1,5 +1,9 @@
 ## master
 
+## v5.4.0
+
+- Use docker v2 `--wait` option
+
 ## v5.3.0
 
 - Switch to Amazon Linux 2023 to fix issue with outdated OpenSSH server
