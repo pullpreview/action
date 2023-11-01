@@ -1,5 +1,6 @@
 require "json"
 require "net/http"
+require "base64"
 
 module PullPreview
   class License
@@ -17,7 +18,7 @@ module PullPreview
     end
 
     def params
-      @details.merge({org_id: @org_id, repo_id: @repo_id, pp_action: @action})
+      @details.merge({org_id: Base64.strict_encode64(@org_id.to_s), repo_id: Base64.strict_encode64(@repo_id.to_s), pp_action: @action})
     end
 
     def fetch!
