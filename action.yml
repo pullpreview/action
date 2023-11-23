@@ -24,7 +24,7 @@ inputs:
   admins:
     description: "Logins of GitHub users that will have their SSH key installed on the instance, comma-separated"
     required: false
-    default: ""
+    default: "@collaborators/push"
   ports:
     description: "Ports to open for external access on the preview server (port 22 is always open), comma-separated"
     required: false
