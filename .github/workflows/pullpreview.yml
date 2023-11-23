@@ -23,14 +23,15 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: "./"
         with:
-          admins: crohr
+          admins: "@collaborators/push"
           always_on: master,v5
           app_path: ./examples/wordpress
-          instance_type: micro_2_0
+          instance_type: micro
           dns: custom.pullpreview.com
+          # only used if fetching images from private registry
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
           ttl: 1h
         env:
