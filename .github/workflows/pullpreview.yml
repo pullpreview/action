@@ -30,9 +30,11 @@ jobs:
           always_on: master,v5
           app_path: ./examples/wordpress
           instance_type: micro
+          # only required if using custom domain for your preview environments
           dns: custom.pullpreview.com
-          # only used if fetching images from private registry
+          # only required if fetching images from private registry
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+          # how long this instance will stay alive (each further commit will reset the timer)
           ttl: 1h
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
