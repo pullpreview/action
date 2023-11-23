@@ -98,7 +98,7 @@ begin
   end
 rescue PullPreview::Error, StandardError => e
   puts "Error: #{e.message}"
-  PullPreview.logger.debug e.backtrace.join("\n")
+  PullPreview.logger.error e.backtrace.join("\n")
   exit 1
 rescue Slop::Error => e
   puts "CLI Error: #{e.message}"
