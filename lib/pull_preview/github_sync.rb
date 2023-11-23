@@ -143,7 +143,7 @@ module PullPreview
         tags = default_instance_tags.push(*opts[:tags]).uniq
         instance = Up.run(
           app_path,
-          opts.merge(name: instance_name, subdomain: instance_subdomain, tags: tags)
+          opts.merge(name: instance_name, subdomain: instance_subdomain, tags: tags, admins: expanded_admins)
         )
         update_github_status(:deployed, instance.url)
       else
@@ -301,6 +301,16 @@ module PullPreview
       else
         ref.sub("refs/heads/", "")
       end
+    end
+
+    def expanded_admins
+      collaborators_with_push = "@collaborators/push"
+      admins = opts[:admins].dup
+      if admins.include?(collaborators_with_push)
+        admins.delete(collaborators_with_push)
+        admins.push(*octokit.collaborators(repo).select{|c| c.permissions&.push}.map(&:login))
+      end
+      admins.uniq
     end
 
     def deployment

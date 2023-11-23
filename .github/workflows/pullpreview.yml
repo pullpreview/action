@@ -23,15 +23,18 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: "./"
         with:
-          admins: crohr
+          admins: "@collaborators/push"
           always_on: master,v5
           app_path: ./examples/wordpress
-          instance_type: micro_2_0
+          instance_type: micro
+          # only required if using custom domain for your preview environments
           dns: custom.pullpreview.com
+          # only required if fetching images from private registry
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+          # how long this instance will stay alive (each further commit will reset the timer)
           ttl: 1h
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
