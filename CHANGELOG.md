@@ -1,5 +1,7 @@
 ## master
 
+## v5.5.0
+
 - Allow to pass "@collaborators/push" as admins
 
 ## v5.4.0
