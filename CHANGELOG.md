@@ -1,5 +1,7 @@
 ## master
 
+- Allow to pass "@collaborators/push" as admins
+
 ## v5.4.0
 
 - Use docker v2 `--wait` option
