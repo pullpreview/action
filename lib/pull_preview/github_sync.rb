@@ -15,7 +15,8 @@ module PullPreview
       PullPreview.logger.debug "github_event_name = #{github_event_name.inspect}"
 
       if github_event_name == "schedule"
-        return clear_dangling_deployments(ENV.fetch("GITHUB_REPOSITORY"), app_path, opts)
+        clear_dangling_deployments(ENV.fetch("GITHUB_REPOSITORY"), app_path, opts)
+        clear_outdated_environments(ENV.fetch("GITHUB_REPOSITORY"), app_path, opts)
       end
 
       github_event_path = ENV.fetch("GITHUB_EVENT_PATH")
@@ -68,6 +69,29 @@ module PullPreview
       end
 
       PullPreview.logger.info "[clear_dangling_deployments] end"
+    end
+
+    # Clear any outdated environments, which have no corresponding PR anymore.
+    def self.clear_outdated_environments(repo, app_path, opts)
+      label = opts[:label]
+      environments_to_remove = Set.new
+      pr_numbers_with_label_assigned = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, pulls: true, state: "all", per_page: 100).map(&:number)
+      PullPreview.octokit.list_deployments(repo, per_page: 100).each do |dep|
+        # regexp must match `pr-`. We don't want to destroy branch environments (`branch-`)
+        pr_number = dep["environment"].match(/gh\-(\d+)\-pr\-(\d+)/)[2].to_i
+        next if pr_number.nil?
+        # don't do anything if the corresponding PR still has the label
+        next if pr_numbers_with_label_assigned.include?(pr_number)
+        environments_to_remove.add dep.environment
+      end
+
+      PullPreview.logger.warn "[clear_outdated_deployments] Found #{environments_to_remove.size} deployments to remove: #{environments_to_remove}."
+
+      environments_to_remove.each do |environment|
+        PullPreview.logger.warn "[clear_outdated_deployments] Clearing deployments for environment #{environment}..."
+        clear_deployments_for(repo, environment, force: true)
+        sleep 5
+      end
     end
 
     def self.clear_deployments_for(repo, environment, force: false)
