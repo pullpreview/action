@@ -77,7 +77,6 @@ module PullPreview
       label = opts[:label]
       environments_to_remove = Set.new
       pr_numbers_with_label_assigned = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, pulls: true, state: "all", per_page: 100).map(&:number)
-      p pr_numbers_with_label_assigned
       PullPreview.octokit.list_environments(repo, per_page: 100).environments.each do |env|
         # regexp must match `pr-`. We don't want to destroy branch environments (`branch-`)
         environment = env.name
