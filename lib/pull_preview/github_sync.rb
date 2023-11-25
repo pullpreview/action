@@ -97,7 +97,20 @@ module PullPreview
     end
 
     def self.destroy_environment(repo, environment)
-      PullPreview.octokit.delete_environment(repo, environment)
+      deploys = PullPreview.octokit.list_deployments(repo, environment: environment, per_page: 100)
+      # make sure all deploys are marked as inactive first
+      deploys.each do |deployment|
+        PullPreview.octokit.create_deployment_status(
+          deployment.url,
+          "inactive",
+          headers: { accept: "application/vnd.github.ant-man-preview+json" }
+        )
+      end
+      deploys.each do |deployment|
+        PullPreview.octokit.delete(deployment.url)
+      end
+      # This requires repository permission, which the GitHub Action token cannot get, so cannot delete the environment unfortunately
+      # PullPreview.octokit.delete_environment(repo, environment)
     rescue => e
       PullPreview.logger.warn "Unable to destroy environment #{environment.inspect}: #{e.message}"
     end
