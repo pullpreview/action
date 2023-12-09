@@ -8,6 +8,7 @@ module PullPreview
     attr_reader :admins
     attr_reader :cidrs
     attr_reader :compose_files
+    attr_reader :compose_options
     attr_reader :default_port
     attr_reader :dns
     attr_reader :name
@@ -41,6 +42,7 @@ module PullPreview
       # TODO: normalize
       @ports = (opts[:ports] || []).push(default_port).push("22").uniq.compact
       @compose_files = opts[:compose_files] || ["docker-compose.yml"]
+      @compose_options = opts[:compose_options] || ["--build"]
       @registries = opts[:registries] || []
       @dns = opts[:dns]
       @size = opts[:instance_type]
@@ -107,6 +109,7 @@ module PullPreview
       OpenStruct.new(
         remote_app_path: remote_app_path,
         compose_files: compose_files,
+        compose_options: compose_options,
         public_ip: public_ip,
         public_dns: public_dns,
         admins: admins,
