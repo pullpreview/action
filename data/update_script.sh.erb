@@ -87,7 +87,7 @@ fi
 
 
 pull() {
-  docker compose pull -q
+  docker-compose pull -q
 }
 
 # pulling images sometimes result in 'unexpected EOF', so retry at most 5 times
@@ -95,11 +95,11 @@ for i in {1..5}; do
   if pull; then break ; fi
 done
 
-docker compose up \
+docker-compose up \
 	--wait \
 	--remove-orphans \
 	-d <%= locals.compose_options.join(" ") %>
 
 sleep 5
 
-docker compose logs --tail 1000
+docker-compose logs --tail 1000
