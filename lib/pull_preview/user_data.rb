@@ -30,7 +30,7 @@ module PullPreview
       result << %{curl -L "https://github.com/docker/compose/releases/download/v2.18.1/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose}
       result << "chmod +x /usr/local/bin/docker-compose"
       result << "usermod -aG docker #{username}"
-      result << "service docker restart"
+      result << "systemctl restart docker"
       result << "echo 'docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune"
       result << "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R #{username}.#{username} /etc/pullpreview"
       result

@@ -41,6 +41,10 @@ inputs:
     description: "Compose files to use when running docker-compose up, comma-separated"
     required: false
     default: "docker-compose.yml"
+  compose_options:
+    description: "Additional options to pass to docker-compose up, comma-separated"
+    required: false
+    default: "--build"
   license:
     description: "PullPreview license"
     required: false

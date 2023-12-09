@@ -59,6 +59,7 @@ echo 'PULLPREVIEW_PUBLIC_DNS=<%= locals.public_dns %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
 echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
+echo "COMPOSE_FILE=<%= locals.compose_files.join(":") %>" >> $PULLPREVIEW_ENV_FILE
 
 set -o allexport
 source $PULLPREVIEW_ENV_FILE
@@ -86,7 +87,7 @@ fi
 
 
 pull() {
-  docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> pull -q
+  docker-compose pull -q
 }
 
 # pulling images sometimes result in 'unexpected EOF', so retry at most 5 times
@@ -94,11 +95,11 @@ for i in {1..5}; do
   if pull; then break ; fi
 done
 
-docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> up \
-	--build \
+docker-compose up \
 	--wait \
 	--remove-orphans \
-	-d
+	-d <%= locals.compose_options.join(" ") %>
 
-sleep 10
-docker-compose <%= locals.compose_files.map{|f| ["-f", f.inspect]}.flatten.join(" ") %> logs --tail 1000
+sleep 5
+
+docker-compose logs --tail 1000
