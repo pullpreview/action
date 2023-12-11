@@ -90,6 +90,8 @@ runs:
     - "${{ inputs.cidrs }}"
     - "--compose-files"
     - "${{ inputs.compose_files }}"
+    - "--compose-options"
+    - "${{ inputs.compose_options }}"
     - "--dns"
     - "${{ inputs.dns }}"
     - "--label"
