@@ -441,7 +441,7 @@ module PullPreview
         components = []
         components.push(deployment_variant) if deployment_variant
         components.push(*["pr", pr_number]) if pr_number
-        components.push(branch)
+        components.push(branch.split("/").last)
         Instance.normalize_name(components.join("-"))
       end
     end
