@@ -78,10 +78,11 @@ module PullPreview
     end
 
     def public_dns
+      reserved_space_for_user_subdomain = 8
       # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
-      remaining_chars_for_subdomain = 62 - dns.size - public_ip.size - "ip".size - ("." * 3).size
+      remaining_chars_for_subdomain = 62 - reserved_space_for_user_subdomain - dns.size - public_ip.size - "ip".size - ("." * 3).size
       [
-        [subdomain[0..remaining_chars_for_subdomain], "ip", public_ip.gsub(".", "-")].join("-"),
+        [subdomain[0..remaining_chars_for_subdomain], "ip", public_ip.gsub(".", "-")].join("-").squeeze("-"),
         dns
       ].join(".")
     end
