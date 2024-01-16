@@ -331,7 +331,7 @@ module PullPreview
 
     def expanded_admins
       collaborators_with_push = "@collaborators/push"
-      admins = opts[:admins].dup
+      admins = opts[:admins].dup.map(&:strip)
       if admins.include?(collaborators_with_push)
         admins.delete(collaborators_with_push)
         admins.push(*octokit.collaborators(repo).select{|c| c.permissions&.push}.map(&:login))
