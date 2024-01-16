@@ -1,5 +1,13 @@
 ## master
 
+## v5.6.0
+
+- Strip admin values
+- Reserve 8 chars for user subdomains
+- Allow to override some of the compose options
+- Fix environment deletion not accessible by integration
+- Clear outdated environments
+
 ## v5.5.0
 
 - Allow to pass "@collaborators/push" as admins
