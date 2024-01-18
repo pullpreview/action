@@ -3,6 +3,7 @@
 A GitHub Action that starts live environments for your pull requests and branches.
 
 [![pullpreview](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml/badge.svg)](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml)
+<a href="https://news.ycombinator.com/item?id=23221471"><img src="https://img.shields.io/badge/Hacker%20News-83-%23FF6600" alt="Hacker News"></a>
 
 ## Spin environments in one click
 
