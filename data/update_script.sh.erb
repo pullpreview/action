@@ -98,10 +98,11 @@ for i in {1..5}; do
   if pull; then break ; fi
 done
 
-docker-compose up \
-	--wait \
-	--remove-orphans \
-	-d <%= locals.compose_options.join(" ") %>
+if [ "$PULLPREVIEW_FIRST_RUN" = true ]; then
+  docker-compose up --wait --remove-orphans -d <%= locals.compose_options.join(" ") %>
+else
+  docker-compose restart
+fi
 
 sleep 5
 
