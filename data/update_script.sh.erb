@@ -67,8 +67,7 @@ set +o allexport
 
 cd /
 
-echo $APP_PATH
-
+# Atomically replacing the app files
 sudo mkdir -p "${APP_PATH}_symlink_new" && sudo chown -R ec2-user.ec2-user "${APP_PATH}_symlink_new" && tar xzf "$1" -C "${APP_PATH}_symlink_new"
 sudo ln -s "${APP_PATH}_symlink_new" "${APP_PATH}"
 sudo rm -rf "${APP_PATH}_symlink_old" || true
@@ -99,8 +98,10 @@ for i in {1..5}; do
 done
 
 if [ "$PULLPREVIEW_FIRST_RUN" = true ]; then
+  echo "Starting up the application..."
   docker-compose up --wait --remove-orphans -d <%= locals.compose_options.join(" ") %>
 else
+  echo "Restarting the application..."
   docker-compose restart
 fi
 
