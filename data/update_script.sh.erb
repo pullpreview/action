@@ -70,8 +70,8 @@ cd /
 sudo mkdir -p "${APP_PATH}_symlink_new" && sudo chown -R ec2-user.ec2-user "${APP_PATH}_symlink_new" && tar xzf "$1" -C "${APP_PATH}_symlink_new"
 sudo ln -s "${APP_PATH}_symlink_new" "${APP_PATH}"
 sudo rm -rf "${APP_PATH}_symlink_old" || true
-sudo rename -s "${APP_PATH}_symlink_new" "${APP_PATH}_symlink_old" app
-sudo chown -R ec2-user.ec2-user "$APP_PATH_symlink_old"
+sudo mv "${APP_PATH}_symlink_new" "${APP_PATH}_symlink_old"
+sudo chown -R ec2-user.ec2-user "${APP_PATH}_symlink_old"
 
 cd "$APP_PATH"
 
