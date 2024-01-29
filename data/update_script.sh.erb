@@ -67,10 +67,11 @@ set +o allexport
 
 cd /
 
-sudo rm -rf "$APP_PATH"
-sudo mkdir -p "$APP_PATH"
-sudo chown -R ec2-user.ec2-user "$APP_PATH"
-tar xzf "$1" -C "$APP_PATH"
+tar xzf "$1" -C "${APP_PATH}_symlink_new"
+ln -s "${APP_PATH}_symlink_new" "${APP_PATH}"
+rm -rf "${APP_PATH}_symlink_old"
+mv "${APP_PATH}_symlink_new" "${APP_PATH}_symlink_old"
+sudo chown -R ec2-user.ec2-user "$APP_PATH_symlink_old"
 
 cd "$APP_PATH"
 
