@@ -101,13 +101,13 @@ for i in {1..5}; do
   if pull; then break ; fi
 done
 
-if [ "$PULLPREVIEW_FIRST_RUN" = true ]; then
-  echo "Starting up the application..."
-  docker-compose up --wait --remove-orphans -d <%= locals.compose_options.join(" ") %>
-else
-  echo "Restarting the application..."
-  docker-compose restart
+if [ "$PULLPREVIEW_FIRST_RUN" = false ]; then
+  echo "Stopping the application..."
+  docker-compose stop
 fi
+
+echo "Starting up the application..."
+docker-compose up --wait --remove-orphans -d <%= locals.compose_options.join(" ") %>
 
 sleep 5
 
