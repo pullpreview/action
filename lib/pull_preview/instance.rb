@@ -89,7 +89,7 @@ module PullPreview
 
     def url
       scheme = (default_port == "443" ? "https" : "http")
-      "#{scheme}://#{public_dns}:#{default_port}"
+      "#{scheme}://#{public_dns}"
     end
 
     def username
@@ -208,7 +208,7 @@ module PullPreview
         end
       end
       [key_file_path].each{|file| FileUtils.chmod 0600, file}
-      
+
       cmd = "ssh #{"-v " if logger.level == Logger::DEBUG}-o ServerAliveInterval=15 -o IdentitiesOnly=yes -i #{key_file_path} #{ssh_address} #{ssh_options.join(" ")} '#{command}'"
       if input && input.respond_to?(:path)
         cmd = "cat #{input.path} | #{cmd}"
