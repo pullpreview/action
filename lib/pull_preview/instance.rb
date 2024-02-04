@@ -57,6 +57,14 @@ module PullPreview
       wait_until_ssh_ready!
     end
 
+    def add_route53_subdomain_entry
+      logger.info "Adding a subdomain entry public_dns=#{public_dns} and target #{public_ip} in DNS Zone"
+      add_dns_entry(dns, public_dns, public_ip)
+
+    def delete_route53_subdomain_entry
+      logger.info "Deleting a subdomain entry public_dns=#{public_dns} and target #{public_ip} in DNS Zone"
+      delete_dns_entry(dns, public_dns, public_ip)
+
     def terminate!
       if provider.terminate!(name)
         logger.info "Instance successfully destroyed"
