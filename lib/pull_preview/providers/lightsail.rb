@@ -28,6 +28,30 @@ module PullPreview
         false
       end
 
+      def add_dns_entry(dns, public_dns, public_ip)
+        domain_entry = {
+          name: public_dns,
+          target: public_ip
+          type: "A"
+        }
+        resp = client.create_domain_entry(domain_name: dns, domain_entry: domain_entry)
+        resp.operation.status == "Succeeded"
+      rescue Aws::Lightsail::Errors::NotFoundException
+        false
+      end
+
+      def delete_dns_entry(dns, public_dns, public_ip)
+        domain_entry = {
+          name: public_dns,
+          target: public_ip
+          type: "A"
+        }
+        resp = client.delete_domain_entry(domain_name: dns, domain_entry: domain_entry)
+        resp.operation.status == "Succeeded"
+      rescue Aws::Lightsail::Errors::NotFoundException
+        false
+      end
+
       def terminate!(name)
         operation = client.delete_instance(instance_name: name).operations.first
         if operation.error_code.nil?
