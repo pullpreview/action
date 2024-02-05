@@ -31,7 +31,7 @@ module PullPreview
       result << "chmod +x /usr/local/bin/docker-compose"
       result << "usermod -aG docker #{username}"
       result << "systemctl restart docker"
-      result << "echo 'docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune"
+      result << "echo 'docker system prune -f && docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune"
       result << "mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R #{username}.#{username} /etc/pullpreview"
       result
     end
