@@ -70,8 +70,8 @@ module PullPreview
         end
       end
 
-      PullPreview.logger.info "Setting up the subdomain to DNS Zone"
-      instance.add_dns_entry
+      PullPreview.logger.info "Setting up the domain entry to DNS Zone"
+      instance.create_domain_entry
 
       puts
       puts "You can access your application at the following URL:"

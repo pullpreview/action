@@ -6,7 +6,7 @@ module PullPreview
       instance.terminate!
 
       PullPreview.logger.info "Deleting the subdomain to DNS Zone"
-      instance.delete_dns_entry
+      instance.delete_domain_entry
     end
   end
 end
