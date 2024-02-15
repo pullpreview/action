@@ -1,5 +1,5 @@
 name: "Preview Environments for GitHub"
-description: "Get automated and ephemeral preview deployments of your app for every pull request. Just using Docker Compose. In your AWS account."
+description: "Ephemeral preview deployments of your app for every pull request. Just using Docker Compose. In your AWS account."
 author: "Cyril Rohr"
 branding:
   icon: anchor
