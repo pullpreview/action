@@ -27,12 +27,12 @@ module PullPreview
         exit 1
       end
 
-      PullPreview.logger.info "Setting up the domain entry to DNS Zone"
-      instance.create_domain_entry
-
       instance = Instance.new(instance_name, opts)
       PullPreview.logger.info "Starting instance name=#{instance.name}"
       instance.launch_and_wait_until_ready!
+
+      PullPreview.logger.info "Setting up the domain entry to DNS Zone"
+      instance.create_domain_entry
 
       PullPreview.logger.info "Synchronizing instance name=#{instance.name}"
       instance.setup_ssh_access
