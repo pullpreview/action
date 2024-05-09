@@ -27,6 +27,9 @@ module PullPreview
         exit 1
       end
 
+      PullPreview.logger.info "Setting up the domain entry to DNS Zone"
+      instance.create_domain_entry
+
       instance = Instance.new(instance_name, opts)
       PullPreview.logger.info "Starting instance name=#{instance.name}"
       instance.launch_and_wait_until_ready!
@@ -69,9 +72,6 @@ module PullPreview
           f.puts "username=#{instance.username}"
         end
       end
-
-      PullPreview.logger.info "Setting up the domain entry to DNS Zone"
-      instance.create_domain_entry
 
       puts
       puts "You can access your application at the following URL:"
