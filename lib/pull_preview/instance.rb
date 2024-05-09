@@ -97,6 +97,14 @@ module PullPreview
       ].join(".")
     end
 
+    def subdomain
+      reserved_space_for_user_subdomain = 8
+      # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
+      remaining_chars_for_subdomain = 62 - reserved_space_for_user_subdomain - dns.size - public_ip.size - "ip".size - ("." * 3).size
+      subdomain[0..remaining_chars_for_subdomain]
+    end
+
+
     def url
       scheme = (default_port == "443" ? "https" : "http")
       "#{scheme}://#{public_dns}"
