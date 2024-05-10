@@ -1,7 +1,7 @@
 module PullPreview
   class Down
-    def self.run(app_path, opts)
-      instance = Instance.new(opts)
+    def self.run(opts)
+      instance = Instance.new(opts[:name], opts)
 
       PullPreview.logger.info "Deleting the subdomain to DNS Zone"
       instance.delete_domain_entry
