@@ -31,6 +31,9 @@ module PullPreview
       PullPreview.logger.info "Starting instance name=#{instance.name}"
       instance.launch_and_wait_until_ready!
 
+      PullPreview.logger.info "Setting up the domain entry to DNS Zone"
+      instance.create_domain_entry
+
       PullPreview.logger.info "Synchronizing instance name=#{instance.name}"
       instance.setup_ssh_access
       instance.setup_update_script

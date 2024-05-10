@@ -57,6 +57,16 @@ module PullPreview
       wait_until_ssh_ready!
     end
 
+    def create_domain_entry
+      logger.info "Adding a domain entry public_dns=#{public_dns} and target #{public_ip} in DNS Zone"
+      provider.create_domain_entry(dns, public_dns, public_ip)
+    end
+
+    def delete_domain_entry
+      logger.info "Deleting a domain entry public_dns=#{public_dns} and target #{public_ip} in DNS Zone"
+      provider.delete_domain_entry(dns, public_dns, public_ip)
+    end
+
     def terminate!
       if provider.terminate!(name)
         logger.info "Instance successfully destroyed"

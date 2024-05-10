@@ -28,6 +28,30 @@ module PullPreview
         false
       end
 
+      def create_domain_entry(dns, public_dns, public_ip)
+        domain_entry = {
+          name: public_dns,
+          target: public_ip,
+          type: "A"
+        }
+        resp = client.create_domain_entry(domain_name: dns, domain_entry: domain_entry)
+        resp.operation.status == "Succeeded"
+      rescue Aws::Lightsail::Errors::NotFoundException
+        false
+      end
+
+      def delete_domain_entry(dns, public_dns, public_ip)
+        domain_entry = {
+          name: public_dns,
+          target: public_ip,
+          type: "A"
+        }
+        resp = client.delete_domain_entry(domain_name: dns, domain_entry: domain_entry)
+        resp.operation.status == "Succeeded"
+      rescue Aws::Lightsail::Errors::NotFoundException
+        false
+      end
+
       def terminate!(name)
         operation = client.delete_instance(instance_name: name).operations.first
         if operation.error_code.nil?
@@ -120,7 +144,7 @@ module PullPreview
       def list_instances(tags: {})
         next_page_token = nil
         begin
-          result = client.get_instances(next_page_token: next_page_token) 
+          result = client.get_instances(next_page_token: next_page_token)
           next_page_token = result.next_page_token
           result.instances.each do |instance|
             matching_tags = Hash[instance.tags.select{|tag| tags.keys.include?(tag.key)}.map{|tag| [tag.key, tag.value]}]
