@@ -147,10 +147,7 @@ module PullPreview
         update_github_status(:destroying)
 
         if instance.running?
-          Down.run(
-          app_path,
-          opts.merge(name: instance_name, subdomain: instance_subdomain)
-        )
+          Down.run(opts.merge(name: instance_name, subdomain: instance_subdomain, tags: tags))
 
         else
           PullPreview.logger.warn "Instance #{instance_name.inspect} already down. Continuing..."
