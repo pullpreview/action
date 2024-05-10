@@ -145,7 +145,7 @@ module PullPreview
       when :pr_down, :branch_down
         instance = Instance.new(instance_name)
         update_github_status(:destroying)
-
+        tags = default_instance_tags.push(*opts[:tags]).uniq
         if instance.running?
           Down.run(opts.merge(name: instance_name, subdomain: instance_subdomain, tags: tags))
 
