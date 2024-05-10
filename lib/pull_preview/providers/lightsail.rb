@@ -34,10 +34,17 @@ module PullPreview
           target: public_ip,
           type: "A"
         }
-        resp = client.create_domain_entry(domain_name: dns, domain_entry: domain_entry)
-        resp.operation.status == "Succeeded"
-      rescue Aws::Lightsail::Errors::NotFoundException
-        false
+
+        begin
+          resp = client.create_domain_entry(domain_name: dns, domain_entry: domain_entry)
+          resp.operation.status == "Succeeded"
+        rescue Aws::Lightsail::Errors::NotFoundException
+          false
+        rescue Aws::Lightsail::Errors::InvalidInputException
+          false
+        rescue StandardError
+          false
+        end
       end
 
       def delete_domain_entry(dns, public_dns, public_ip)
@@ -46,10 +53,17 @@ module PullPreview
           target: public_ip,
           type: "A"
         }
-        resp = client.delete_domain_entry(domain_name: dns, domain_entry: domain_entry)
-        resp.operation.status == "Succeeded"
-      rescue Aws::Lightsail::Errors::NotFoundException
-        false
+
+        begin
+          resp = client.delete_domain_entry(domain_name: dns, domain_entry: domain_entry)
+          resp.operation.status == "Succeeded"
+        rescue Aws::Lightsail::Errors::NotFoundException
+          false
+        rescue Aws::Lightsail::Errors::InvalidInputException
+          false
+        rescue StandardError
+          false
+        end
       end
 
       def terminate!(name)
