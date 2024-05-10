@@ -42,6 +42,8 @@ module PullPreview
           false
         rescue Aws::Lightsail::Errors::InvalidInputException
           false
+        rescue StandardError
+          false
         end
       end
 
@@ -58,6 +60,8 @@ module PullPreview
         rescue Aws::Lightsail::Errors::NotFoundException
           false
         rescue Aws::Lightsail::Errors::InvalidInputException
+          false
+        rescue StandardError
           false
         end
       end
