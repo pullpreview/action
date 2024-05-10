@@ -64,9 +64,6 @@ module PullPreview
 
     def delete_domain_entry
       logger.info "Deleting a domain entry public_dns=#{public_dns} and target #{public_ip} in DNS Zone"
-      logger.info "DNS #{public_dns}"
-      logger.info "ID #{public_ip}"
-      logger.info "dns #{dns}"
       provider.delete_domain_entry(dns, public_dns, public_ip)
     end
 
