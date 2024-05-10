@@ -43,6 +43,8 @@ module PullPreview
       def delete_domain_entry(dns, public_dns, public_ip)
         domain_entry = {
           name: public_dns,
+          target: public_ip,
+          type: "A"
         }
         resp = client.delete_domain_entry(domain_name: dns, domain_entry: domain_entry)
         resp.operation.status == "Succeeded"
