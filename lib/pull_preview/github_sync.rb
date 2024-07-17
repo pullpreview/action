@@ -58,10 +58,13 @@ module PullPreview
         if pr.base.repo.owner.type == "Organization"
           fake_github_context.organization = pr.base.repo.owner
         end
+        environment = PullPreview.octokit.list_environments(repo, per_page: 100).environments.find { |env| env.name.includes("gh-pr-#{pr.number}") }
         if pr_issue.state == "closed"
           PullPreview.logger.warn "[clear_dangling_deployments] Found dangling #{label} label for PR##{pr.number}. Cleaning up..."
+          destroy_environment(repo, environment)
         elsif pr_expired?(pr_issue.updated_at, ttl)
           PullPreview.logger.warn "[clear_dangling_deployments] Found #{label} label for expired PR##{pr.number} (#{pr_issue.updated_at}). Cleaning up..."
+          destroy_environment(repo, environment)
         else
           PullPreview.logger.warn "[clear_dangling_deployments] Found #{label} label for active PR##{pr.number} (#{pr_issue.updated_at}). Not touching."
           next
@@ -107,6 +110,7 @@ module PullPreview
         )
       end
       deploys.each do |deployment|
+        PullPreview.logger.warn "[destroy_environment] Found #{deployment.url}. Destroying..."
         PullPreview.octokit.delete(deployment.url)
       end
       # This requires repository permission, which the GitHub Action token cannot get, so cannot delete the environment unfortunately
