@@ -19,6 +19,8 @@ module PullPreview
     attr_reader :size
     attr_reader :tags
     attr_reader :access_details
+    attr_reader :first_run_script
+    attr_reader :update_run_script
 
     class << self
       attr_accessor :client
@@ -48,6 +50,8 @@ module PullPreview
       @size = opts[:instance_type]
       @ssh_results = []
       @tags = opts[:tags] || {}
+      @first_run_script = opts[:first_run_script] || ""
+      @update_run_script = opts[:update_run_script] || ""
     end
 
     def launch_and_wait_until_ready!
@@ -115,6 +119,8 @@ module PullPreview
         public_dns: public_dns,
         admins: admins,
         url: url,
+        first_run_script: first_run_script,
+        run_script: update_run_script,
       )
     end
 

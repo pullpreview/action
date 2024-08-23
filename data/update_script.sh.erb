@@ -60,6 +60,8 @@ echo 'PULLPREVIEW_PUBLIC_IP=<%= locals.public_ip %>' >> $PULLPREVIEW_ENV_FILE
 echo 'PULLPREVIEW_URL=<%= locals.url %>' >> $PULLPREVIEW_ENV_FILE
 echo "PULLPREVIEW_FIRST_RUN=$PULLPREVIEW_FIRST_RUN" >> $PULLPREVIEW_ENV_FILE
 echo "COMPOSE_FILE=<%= locals.compose_files.join(":") %>" >> $PULLPREVIEW_ENV_FILE
+echo "FIRST_RUN_SCRIPT=<%= locals.first_run_script %>" >> $PULLPREVIEW_ENV_FILE
+echo "UPDATE_RUN_SCRIPT=<%= locals.update_run_script %>" >> $PULLPREVIEW_ENV_FILE
 
 set -o allexport
 source $PULLPREVIEW_ENV_FILE
@@ -83,6 +85,20 @@ sudo yum update -y || true
 if ! /tmp/pre_script.sh ; then
   echo "Failed to run the pre-script"
   exit 1
+fi
+
+if $PULLPREVIEW_FIRST_RUN ; then
+  if [ -f "$FIRST_RUN_SCRIPT" ]; then
+    chmod +x $FIRST_RUN_SCRIPT
+    source $FIRST_RUN_SCRIPT
+    chmod -x $FIRST_RUN_SCRIPT
+  fi
+fi
+
+if [ -f "$UPDATE_RUN_SCRIPT" ]; then
+  chmod +x $UPDATE_RUN_SCRIPT
+  source $UPDATE_RUN_SCRIPT
+  chmod -x $FIRST_RUN_SCRIPT
 fi
 
 

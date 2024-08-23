@@ -69,6 +69,14 @@ inputs:
     description: "Maximum time to live for deployments (e.g. 10h, 5d, infinite)"
     required: false
     default: "infinite"
+  first_run_script:
+    description: "The path to a script to run on the server host on first run"
+    required: false
+    default: ""
+  update_run_script:
+    description: "The path to a script to run on the server host on every update"
+    required: false
+    default: ""
 
 outputs:
   url:
@@ -110,6 +118,10 @@ runs:
     - "${{ inputs.registries }}"
     - "--ttl"
     - "${{ inputs.ttl }}"
+    - "--first-run-script"
+    - "${{ inputs.first_run_script }}"
+    - "--update-run-script"
+    - "${{ inputs.update_run_script }}"
   env:
     GITHUB_TOKEN: "${{ inputs.github_token }}"
     PULLPREVIEW_LICENSE: "${{ inputs.license }}"
