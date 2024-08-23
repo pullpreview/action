@@ -37,7 +37,7 @@ up_opts = lambda do |o|
   o.array '--tags', 'Tags to add to the instance'
   o.array '--compose-files', 'Compose files to use when running docker-compose up', default: ["docker-compose.yml"]
   o.array '--compose-options', 'Additional options to pass to docker-compose up, comma-separated', default: ["--build"]
-  o.string '--first_run_script', 'The path to a script to run on the server host on first run', default: [""]
+  o.string '--first-run-script', 'The path to a script to run on the server host on first run', default: [""]
   o.string '--update-run-script', 'The path to a script to run on the server host on every update', default: [""]
 end
 
