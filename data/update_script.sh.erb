@@ -89,6 +89,7 @@ fi
 
 if $PULLPREVIEW_FIRST_RUN ; then
   if [ -f "$FIRST_RUN_SCRIPT" ]; then
+    echo "Executing $FIRST_RUN_SCRIPT"
     chmod +x $FIRST_RUN_SCRIPT
     source $FIRST_RUN_SCRIPT
     chmod -x $FIRST_RUN_SCRIPT
@@ -96,6 +97,7 @@ if $PULLPREVIEW_FIRST_RUN ; then
 fi
 
 if [ -f "$UPDATE_RUN_SCRIPT" ]; then
+  echo "Executing $UPDATE_RUN_SCRIPT"
   chmod +x $UPDATE_RUN_SCRIPT
   source $UPDATE_RUN_SCRIPT
   chmod -x $FIRST_RUN_SCRIPT
