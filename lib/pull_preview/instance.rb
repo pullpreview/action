@@ -120,7 +120,7 @@ module PullPreview
         admins: admins,
         url: url,
         first_run_script: first_run_script,
-        run_script: update_run_script,
+        update_run_script: update_run_script,
       )
     end
 
