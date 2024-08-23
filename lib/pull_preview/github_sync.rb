@@ -196,7 +196,7 @@ module PullPreview
         return :pr_down
       end
 
-      if pr_labeled? && pr_has_label?
+      if (pr_opened? || pr_reopened? || pr_labeled?) && pr_has_label?
         return :pr_up
       end
 
@@ -368,6 +368,16 @@ module PullPreview
     def pr_synchronize?
       pull_request? &&
         github_context["action"] == "synchronize"
+    end
+
+    def pr_opened?
+      pull_request? &&
+        github_context["action"] == "opened"
+    end
+
+    def pr_reopened?
+      pull_request? &&
+        github_context["action"] == "reopened"
     end
 
     def pr_closed?
