@@ -36,6 +36,7 @@ jobs:
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
           # how long this instance will stay alive (each further commit will reset the timer)
           ttl: 1h
+          pre_script: ./examples/wordpress/pre_script.sh
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
