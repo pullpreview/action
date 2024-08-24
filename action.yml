@@ -19,7 +19,7 @@ inputs:
     description: "Label to use for triggering preview deployments"
     default: "pullpreview"
   github_token:
-    description: "The personal access token used to update the status of your commit"
+    description: "The GitHub access token used to perform GitHub API operations. A custom token is only required for auto-cleanup of GitHub environment objects."
     default: "${{ github.token }}"
   admins:
     description: "Logins of GitHub users that will have their SSH key installed on the instance, comma-separated"
