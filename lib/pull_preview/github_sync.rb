@@ -109,10 +109,15 @@ module PullPreview
       deploys.each do |deployment|
         PullPreview.octokit.delete(deployment.url)
       end
-      # This requires repository permission, which the GitHub Action token cannot get, so cannot delete the environment unfortunately
-      # PullPreview.octokit.delete_environment(repo, environment)
+      # This requires repository permission, which the default GitHub Action token cannot get, so this will fail if the github_token input is not used.
+      # Logging a warning message to let the user know that he will have to clean the environment manually.
+      begin
+        PullPreview.octokit.delete_environment(repo, environment)
+      rescue => Octokit::Error
+        PullPreview.logger.warn "Unable to destroy the environment #{environment.inspect}: #{e.message}. To destroy the environment object on GitHub, you will have to manually delete it from the GitHub UI, or pass a GitHub token with repository permissions to the action. This does not affect the cleaning of instances, only the GitHub environment object."
+      end
     rescue => e
-      PullPreview.logger.warn "Unable to destroy environment #{environment.inspect}: #{e.message}"
+      PullPreview.logger.error "Unable to destroy environment #{environment.inspect}: #{e.message}"
     end
 
     def initialize(github_context, app_path, opts = {})
