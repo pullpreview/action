@@ -113,7 +113,7 @@ module PullPreview
       # Logging a warning message to let the user know that he will have to clean the environment manually.
       begin
         PullPreview.octokit.delete_environment(repo, environment)
-      rescue => Octokit::Error
+      rescue Octokit::Error => e
         PullPreview.logger.warn "Unable to destroy the environment #{environment.inspect}: #{e.message}. To destroy the environment object on GitHub, you will have to manually delete it from the GitHub UI, or pass a GitHub token with repository permissions to the action. This does not affect the cleaning of instances, only the GitHub environment object."
       end
     rescue => e
