@@ -19,6 +19,7 @@ module PullPreview
     attr_reader :size
     attr_reader :tags
     attr_reader :access_details
+    attr_reader :pre_script
 
     class << self
       attr_accessor :client
@@ -48,6 +49,7 @@ module PullPreview
       @size = opts[:instance_type]
       @ssh_results = []
       @tags = opts[:tags] || {}
+      @pre_script = opts[:pre_script]
     end
 
     def launch_and_wait_until_ready!
@@ -176,6 +178,10 @@ module PullPreview
         rescue URI::Error, Error => e
           logger.warn "Registry ##{index} is invalid: #{e.message}"
         end
+      end
+      if pre_script && !pre_script.empty?
+        tmpfile.puts "echo 'Attempting to run pre-script at #{pre_script}...'"
+        tmpfile.puts "bash -e #{pre_script}"
       end
       tmpfile.flush
       unless scp(tmpfile.path, "/tmp/pre_script.sh", mode: "0755")

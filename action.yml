@@ -65,6 +65,10 @@ inputs:
     description: "Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io"
     required: false
     default: ""
+  pre_script:
+    description: "Path to a bash script to run on the instance, before calling docker compose, relative to the app_path"
+    required: false
+    default: ""
   ttl:
     description: "Maximum time to live for deployments (e.g. 10h, 5d, infinite)"
     required: false
@@ -108,6 +112,8 @@ runs:
     - "${{ inputs.deployment_variant }}"
     - "--registries"
     - "${{ inputs.registries }}"
+    - "--pre-script"
+    - "${{ inputs.pre_script }}"
     - "--ttl"
     - "${{ inputs.ttl }}"
   env:

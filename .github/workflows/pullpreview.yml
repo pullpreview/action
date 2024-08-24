@@ -36,6 +36,8 @@ jobs:
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
           # how long this instance will stay alive (each further commit will reset the timer)
           ttl: 1h
+          # preinstall script to run on the instance before docker-compose is called, relative to the app_path
+          pre_script: ./pre_script.sh
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
