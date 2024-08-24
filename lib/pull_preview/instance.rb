@@ -179,8 +179,8 @@ module PullPreview
           logger.warn "Registry ##{index} is invalid: #{e.message}"
         end
       end
-      unless pre_script.blank?
-        tmpfile.puts "echo 'Running pre-script at #{pre_script}...'"
+      if pre_script && !pre_script.empty?
+        tmpfile.puts "echo 'Attempting to run pre-script at #{pre_script}...'"
         tmpfile.puts "bash -e #{pre_script}"
       end
       tmpfile.flush
