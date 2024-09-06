@@ -3,6 +3,9 @@ require "ostruct"
 
 module PullPreview
   class Instance
+    # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
+    DEFAULT_MAX_DOMAIN_LENGTH = 62
+
     include Utils
 
     attr_reader :admins
@@ -79,14 +82,24 @@ module PullPreview
       access_details.ip_address
     end
 
+    def max_domain_length
+      value = ENV.fetch("PULLPREVIEW_MAX_DOMAIN_LENGTH", DEFAULT_MAX_DOMAIN_LENGTH).to_i
+      value = DEFAULT_MAX_DOMAIN_LENGTH if value <= 0 || value > DEFAULT_MAX_DOMAIN_LENGTH
+      value
+    end
+
+    # Leave 8 chars for an additional subdomain that could be needed by the deployed app.
+    # Disabled if custom domain length is specified.
+    def reserved_space_for_user_subdomain
+      max_domain_length != DEFAULT_MAX_DOMAIN_LENGTH ? 0 : 8
+    end
+
     def public_dns
-      reserved_space_for_user_subdomain = 8
-      # https://community.letsencrypt.org/t/a-certificate-for-a-63-character-domain/78870/4
-      remaining_chars_for_subdomain = 62 - reserved_space_for_user_subdomain - dns.size - public_ip.size - "ip".size - ("." * 3).size
+      remaining_chars_for_subdomain = max_domain_length - reserved_space_for_user_subdomain - dns.size - public_ip.size - "ip".size - ("." * 3).size
       [
-        [subdomain[0..remaining_chars_for_subdomain], "ip", public_ip.gsub(".", "-")].join("-").squeeze("-"),
+        [subdomain[0..[(remaining_chars_for_subdomain - 1), 0].max], "ip", public_ip.gsub(".", "-")].join("-").squeeze("-"),
         dns
-      ].join(".")
+      ].reject{|part| part.empty?}.join(".")
     end
 
     def url
