@@ -1,5 +1,13 @@
 ## master
 
+## v5.7.0
+
+- Add docker system prune to cleanup (#72)
+- Spinup preview environment on open/reopen (#86)
+- Allow custom pre-script to be run (#88)
+- Re-enabling attempt to delete environment (#89)
+- Add max_domain_length setting to control length of generated FQDN (#90)
+
 ## v5.6.0
 
 - Strip admin values
