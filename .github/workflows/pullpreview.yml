@@ -31,7 +31,7 @@ jobs:
           app_path: ./examples/wordpress
           instance_type: micro
           # only required if using custom domain for your preview environments
-          dns: custom.pullpreview.com
+          dns: custom.preview.run
           max_domain_length: 30
           # only required if fetching images from private registry
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io

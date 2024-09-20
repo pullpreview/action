@@ -14,7 +14,7 @@ inputs:
     default: ""
   dns:
     description: "Which DNS suffix to use"
-    default: "my.pullpreview.com"
+    default: "my.preview.run"
   max_domain_length:
     description: "Maximum length of fully qualified domain name. Note that it cannot be greater than 62 characters due to LetsEncrypt restrictions."
     default: "62"
