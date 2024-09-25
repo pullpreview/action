@@ -1,5 +1,9 @@
 ## master
 
+## v5.8.0
+
+- Switch default domain to my.preview.run (#92)
+
 ## v5.7.0
 
 - Add docker system prune to cleanup (#72)
