@@ -14,7 +14,7 @@ inputs:
     default: ""
   dns:
     description: "Which DNS suffix to use"
-    default: "my.pullpreview.com"
+    default: "my.preview.run"
   github_token:
     description: "The personal access token used to update the status of your commit"
     default: "${{ github.token }}"
