@@ -67,10 +67,16 @@ set +o allexport
 
 cd /
 
-sudo rm -rf "$APP_PATH"
-sudo mkdir -p "$APP_PATH"
-sudo chown -R ec2-user.ec2-user "$APP_PATH"
-tar xzf "$1" -C "$APP_PATH"
+# atomically replacing the app files
+if file "$APP_PATH" | grep 'directory'; then 
+  sudo rm -rf "$APP_PATH" 
+fi
+sudo mkdir -p "${APP_PATH}_symlink_new" && sudo chown -R ec2-user.ec2-user "${APP_PATH}_symlink_new" && tar xzf "$1" -C "${APP_PATH}_symlink_new"
+sudo ln -s "${APP_PATH}_symlink_new" "${APP_PATH}"
+sudo rm -rf "${APP_PATH}_symlink_old" || true
+sudo mv "${APP_PATH}_symlink_new" "${APP_PATH}_symlink_old"
+sudo ln -vfns "${APP_PATH}_symlink_old" "${APP_PATH}"
+sudo chown -R ec2-user.ec2-user "${APP_PATH}_symlink_old"
 
 cd "$APP_PATH"
 
@@ -95,10 +101,13 @@ for i in {1..5}; do
   if pull; then break ; fi
 done
 
-docker-compose up \
-	--wait \
-	--remove-orphans \
-	-d <%= locals.compose_options.join(" ") %>
+if [ "$PULLPREVIEW_FIRST_RUN" = false ]; then
+  echo "Stopping the application..."
+  docker-compose stop
+fi
+
+echo "Starting up the application..."
+docker-compose up --wait --remove-orphans -d <%= locals.compose_options.join(" ") %>
 
 sleep 5
 
