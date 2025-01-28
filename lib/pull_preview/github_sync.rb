@@ -339,7 +339,9 @@ module PullPreview
       admins = opts[:admins].dup.map(&:strip)
       if admins.include?(collaborators_with_push)
         admins.delete(collaborators_with_push)
-        admins.push(*octokit.collaborators(repo).select{|c| c.permissions&.push}.map(&:login))
+        collaborators = octokit.collaborators(repo)
+        p [:collaborators, collaborators]
+        admins.push(*collaborators.select{|c| c.permissions&.push}.map(&:login))
       end
       admins.uniq
     end
