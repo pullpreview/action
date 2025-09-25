@@ -47,6 +47,7 @@ module PullPreview
       label = opts[:label]
       pr_issues_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, state: "all", per_page: 100)
       pr_issues_labeled.each do |pr_issue|
+        next unless pr_issue.pull_request
         pr = PullPreview.octokit.get(pr_issue.pull_request.url)
         fake_github_context = OpenStruct.new(
           action: "closed",
