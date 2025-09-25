@@ -45,7 +45,7 @@ module PullPreview
       ttl = opts[:ttl] || "infinite"
       PullPreview.logger.info "[clear_dangling_deployments] start"
       label = opts[:label]
-      pr_issues_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, pulls: true, state: "all", per_page: 100)
+      pr_issues_labeled = PullPreview.octokit.get("repos/#{repo}/issues", labels: label, state: "all", per_page: 100)
       pr_issues_labeled.each do |pr_issue|
         pr = PullPreview.octokit.get(pr_issue.pull_request.url)
         fake_github_context = OpenStruct.new(
