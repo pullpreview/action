@@ -339,7 +339,10 @@ module PullPreview
       admins = opts[:admins].dup.map(&:strip)
       if admins.include?(collaborators_with_push)
         admins.delete(collaborators_with_push)
+        auto_paginate_before = octokit.auto_paginate
+        octokit.auto_paginate = true
         admins.push(*octokit.collaborators(repo).select{|c| c.permissions&.push}.map(&:login))
+        octokit.auto_paginate = auto_paginate_before
       end
       admins.uniq
     end
