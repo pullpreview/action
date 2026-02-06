@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,6 +37,7 @@ type Instance struct {
 	DefaultPort    string
 	DNS            string
 	Ports          []string
+	ProxyTLS       string
 	Provider       Provider
 	Registries     []string
 	Size           string
@@ -48,6 +50,14 @@ type Instance struct {
 
 func NewInstance(name string, opts CommonOptions, provider Provider, logger *Logger) *Instance {
 	normalized := NormalizeName(name)
+	defaultPort := defaultString(opts.DefaultPort, "80")
+	proxyTLS := strings.TrimSpace(opts.ProxyTLS)
+	if proxyTLS != "" {
+		if defaultPort != "443" && logger != nil {
+			logger.Warnf("proxy_tls=%q enabled: overriding default_port=%s to 443", proxyTLS, defaultPort)
+		}
+		defaultPort = "443"
+	}
 	return &Instance{
 		Name:           normalized,
 		Subdomain:      NormalizeName(name),
@@ -55,9 +65,10 @@ func NewInstance(name string, opts CommonOptions, provider Provider, logger *Log
 		CIDRs:          defaultSlice(opts.CIDRs, []string{"0.0.0.0/0"}),
 		ComposeFiles:   defaultSlice(opts.ComposeFiles, []string{"docker-compose.yml"}),
 		ComposeOptions: defaultSlice(opts.ComposeOptions, []string{"--build"}),
-		DefaultPort:    defaultString(opts.DefaultPort, "80"),
+		DefaultPort:    defaultPort,
 		DNS:            defaultString(opts.DNS, "my.preview.run"),
 		Ports:          opts.Ports,
+		ProxyTLS:       proxyTLS,
 		Provider:       provider,
 		Registries:     opts.Registries,
 		Size:           opts.InstanceType,
@@ -167,9 +178,40 @@ func (i *Instance) Username() string {
 }
 
 func (i *Instance) PortsWithDefaults() []string {
-	ports := append([]string{}, i.Ports...)
+	proxyTLSEnabled := strings.TrimSpace(i.ProxyTLS) != ""
+	ports := []string{}
+	for _, port := range i.Ports {
+		if proxyTLSEnabled && firewallRuleTargetsPort(port, 80) {
+			continue
+		}
+		ports = append(ports, port)
+	}
+	if strings.TrimSpace(i.ProxyTLS) != "" {
+		ports = append(ports, "443")
+	}
 	ports = append(ports, i.DefaultPort, "22")
 	return uniqueStrings(ports)
+}
+
+func firewallRuleTargetsPort(rule string, port int) bool {
+	value := strings.TrimSpace(rule)
+	if value == "" {
+		return false
+	}
+	if idx := strings.Index(value, "/"); idx >= 0 {
+		value = value[:idx]
+	}
+	if strings.Contains(value, ":") {
+		parts := strings.Split(value, ":")
+		if len(parts) > 0 {
+			value = parts[len(parts)-1]
+		}
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	return parsed == port
 }
 
 func uniqueStrings(values []string) []string {

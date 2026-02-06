@@ -32,7 +32,13 @@ Supported commands:
 - Tars app directory (excluding `.git`).
 - Launches/restores Lightsail instance and waits for SSH.
 - Uploads authorized keys, update script, and pre-script.
-- Deploys with Docker Compose on the instance.
+- Deploys through Docker context to the remote engine.
+- Rewrites relative bind mounts under `app_path` so they resolve on the remote host.
+- Optional automatic HTTPS proxying via Caddy + Let's Encrypt when `proxy_tls` is set.
+  - Format: `service:port` (for example `web:80`).
+  - Forces preview URL/output to HTTPS on port `443`.
+  - Opens firewall port `443` and suppresses firewall exposure for port `80`.
+  - Injects `pullpreview-proxy` service unless host port `443` is already published (then it logs a warning and skips proxy injection).
 - Emits periodic heartbeat logs with:
   - preview URL
   - SSH command (`ssh user@ip`)
@@ -52,6 +58,7 @@ Supported commands:
 - Existing inputs are preserved.
 - Additional input:
   - `comment_pr` (`true`/`false`, default `true`)
+  - `proxy_tls` (`service:port`, default empty)
 - Outputs:
   - `url`
   - `host`

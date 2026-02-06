@@ -13,6 +13,7 @@ import (
 type fakeGitHub struct {
 	latestSHA           string
 	commitStatuses      []string
+	commitStatusURLs    []string
 	deploymentStates    []string
 	deployments         []*gh.Deployment
 	pullRequestsByRef   map[string][]*gh.PullRequest
@@ -61,6 +62,7 @@ func (f *fakeGitHub) CreateDeploymentStatus(repo string, deploymentID int64, sta
 
 func (f *fakeGitHub) CreateCommitStatus(repo, sha, state, targetURL, context, description string) error {
 	f.commitStatuses = append(f.commitStatuses, state)
+	f.commitStatusURLs = append(f.commitStatusURLs, targetURL)
 	return nil
 }
 
@@ -235,6 +237,44 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	}
 	if !strings.Contains(client.updatedComments[len(client.updatedComments)-1], "✅ Deploy successful") {
 		t.Fatalf("expected successful deploy text in comment, got %q", client.updatedComments[len(client.updatedComments)-1])
+	}
+}
+
+func TestSyncLabeledProxyTLSUsesHTTPSURLInStatusAndComment(t *testing.T) {
+	t.Setenv("PULLPREVIEW_TEST", "1")
+	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
+	t.Setenv("GITHUB_RUN_ID", "12345")
+
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
+	sync := newSync(event, GithubSyncOptions{
+		Label:     "pullpreview",
+		CommentPR: true,
+		Common:    CommonOptions{ProxyTLS: "web:80"},
+	}, client, fakeProvider{running: true})
+
+	if err := sync.Sync(); err != nil {
+		t.Fatalf("Sync() returned error: %v", err)
+	}
+	if len(client.commitStatusURLs) == 0 {
+		t.Fatalf("expected commit status URLs to be recorded")
+	}
+
+	foundHTTPS := false
+	for _, value := range client.commitStatusURLs {
+		if strings.HasPrefix(value, "https://") {
+			foundHTTPS = true
+			break
+		}
+	}
+	if !foundHTTPS {
+		t.Fatalf("expected at least one https commit status URL, got %v", client.commitStatusURLs)
+	}
+	if len(client.updatedComments) == 0 {
+		t.Fatalf("expected PR comment update on deployed state")
+	}
+	if !strings.Contains(client.updatedComments[len(client.updatedComments)-1], "https://") {
+		t.Fatalf("expected https preview URL in PR comment, got %q", client.updatedComments[len(client.updatedComments)-1])
 	}
 }
 

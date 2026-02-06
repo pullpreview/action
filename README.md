@@ -62,6 +62,10 @@ Preview environments that:
   database data) will be persisted across deploys, making the life of reviewers
   easier.
 
+- can **auto-enable HTTPS** with Let's Encrypt: Set `proxy_tls` to inject a
+  Caddy reverse proxy that terminates TLS and forwards traffic to your service.
+  This switches the preview URL to HTTPS on port `443`.
+
 - are **easy to troubleshoot**: You can give specific GitHub users the
   authorization to SSH into the preview instance (with sudo privileges) to
   further troubleshoot any issue. The SSH keys that they use to push to GitHub
@@ -125,6 +129,8 @@ jobs:
           instance_type: nano
           # Ports to open on the server
           ports: 80,5432
+          # Optional: automatic HTTPS forwarding via Caddy + Let's Encrypt
+          proxy_tls: web:80
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"

@@ -36,6 +36,8 @@ jobs:
           # only required if using custom domain for your preview environments
           dns: toto.preview.run
           max_domain_length: 30
+          # Enable HTTPS preview URL through Caddy + Let's Encrypt.
+          proxy_tls: web:8080
           # required here because the mysql image is private in GHCR
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
           # how long this instance will stay alive (each further commit will reset the timer)
@@ -50,6 +52,11 @@ jobs:
           PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}
         run: |
           set -euo pipefail
+
+          if [[ "${PREVIEW_URL}" != https://* ]]; then
+            echo "::error::Expected https preview URL when proxy_tls is enabled, got ${PREVIEW_URL}"
+            exit 1
+          fi
 
           response=""
           for attempt in $(seq 1 60); do
@@ -99,6 +106,7 @@ jobs:
           instance_type: micro
           dns: toto.preview.run
           max_domain_length: 30
+          proxy_tls: web:8080
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
           ttl: 1h
         env:
@@ -111,6 +119,11 @@ jobs:
           PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}
         run: |
           set -euo pipefail
+
+          if [[ "${PREVIEW_URL}" != https://* ]]; then
+            echo "::error::Expected https preview URL when proxy_tls is enabled, got ${PREVIEW_URL}"
+            exit 1
+          fi
 
           response=""
           for attempt in $(seq 1 60); do
@@ -144,6 +157,7 @@ jobs:
           instance_type: micro
           dns: toto.preview.run
           max_domain_length: 30
+          proxy_tls: web:8080
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
           ttl: 1h
         env:

@@ -841,6 +841,7 @@ func instanceToCommon(inst *Instance) CommonOptions {
 		Admins:         inst.Admins,
 		CIDRs:          inst.CIDRs,
 		Registries:     inst.Registries,
+		ProxyTLS:       inst.ProxyTLS,
 		DNS:            inst.DNS,
 		Ports:          inst.Ports,
 		InstanceType:   inst.Size,
