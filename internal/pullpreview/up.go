@@ -1,0 +1,111 @@
+package pullpreview
+
+import (
+	"fmt"
+	"os"
+	"time"
+)
+
+func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error) {
+	if logger != nil {
+		logger.Debugf("options=%+v", opts)
+	}
+	instance := NewInstance(opts.Name, opts.Common, provider, logger)
+	if opts.Subdomain != "" {
+		instance.WithSubdomain(opts.Subdomain)
+	}
+
+	appPath := opts.AppPath
+	clonePath, cloneCleanup, err := instance.CloneIfURL(appPath)
+	if err != nil {
+		return nil, err
+	}
+	defer cloneCleanup()
+	appPath = clonePath
+
+	tarball, cleanup, err := instance.LocalTarballPath(appPath)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	if logger != nil {
+		logger.Infof("Taring up repository at %s...", appPath)
+	}
+
+	if err := instance.LaunchAndWait(); err != nil {
+		return nil, err
+	}
+
+	if logger != nil {
+		logger.Infof("Synchronizing instance name=%s", instance.Name)
+	}
+
+	if err := instance.SetupScripts(); err != nil {
+		return nil, err
+	}
+
+	instructions := fmt.Sprintf("\nTo connect to the instance (authorized GitHub users: %s):\n  ssh %s\n", join(instance.Admins, ", "), instance.SSHAddress())
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Println(instructions)
+			case <-stop:
+				return
+			}
+		}
+	}()
+
+	if logger != nil {
+		if info, err := os.Stat(tarball); err == nil {
+			logger.Infof("Preparing to push app tarball (%.2fMB)", float64(info.Size())/1024.0/1024.0)
+		}
+	}
+
+	if err := instance.UpdateFromTarball(tarball); err != nil {
+		close(stop)
+		return nil, err
+	}
+	close(stop)
+
+	writeGithubOutputs(instance)
+
+	fmt.Println("\nYou can access your application at the following URL:")
+	fmt.Printf("  %s\n\n", instance.URL())
+	fmt.Println(instructions)
+	fmt.Println("Then to view the logs:")
+	fmt.Println("  docker-compose logs --tail 1000 -f")
+	fmt.Println()
+
+	return instance, nil
+}
+
+func join(values []string, sep string) string {
+	out := ""
+	for i, v := range values {
+		if i > 0 {
+			out += sep
+		}
+		out += v
+	}
+	return out
+}
+
+func writeGithubOutputs(instance *Instance) {
+	path := os.Getenv("GITHUB_OUTPUT")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "url=%s\n", instance.URL())
+	fmt.Fprintf(f, "host=%s\n", instance.PublicIP())
+	fmt.Fprintf(f, "username=%s\n", instance.Username())
+}
