@@ -15,10 +15,13 @@
 - Action runtime: `action.yml` composite action invoking bundled binaries from `dist/`
 
 ## Packaging Strategy
-- Runtime binaries are committed in-repo (`dist/pullpreview-linux-amd64`, `dist/pullpreview-linux-arm64`).
+- Runtime binary is committed in-repo (`dist/pullpreview-linux-amd64`).
+- Binary is compressed with `upx` in `make dist`.
 - No Docker image build is required during action execution.
 - Release/update command:
   - `make dist`
+  - source changes must be committed before running `make dist`
+  - `make dist` auto-commits the refreshed binary with a standard commit message
 
 ## Completed Migration Work
 1. Ported command behaviors:
