@@ -1,8 +1,0 @@
-*.swp
-test/
-img/
-.dockerignore
-.git
-.github
-Makefile
-.env*
