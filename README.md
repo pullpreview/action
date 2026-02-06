@@ -1,4 +1,4 @@
-# PullPreview
+# <img width="25" height="25" alt="pullpreview" src="https://github.com/user-attachments/assets/3aeb0f94-cac5-44b2-9f8e-abdb12be9cfe" /> PullPreview
 
 A GitHub Action that starts live environments for your pull requests and branches.
 
