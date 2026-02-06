@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,13 +27,7 @@ var (
 type GitHubAPI interface {
 	ListIssues(repo, label string) ([]*gh.Issue, error)
 	GetPullRequest(repo string, number int) (*gh.PullRequest, error)
-	ListEnvironments(repo string) ([]*gh.Environment, error)
-	ListDeployments(repo, environment, ref string) ([]*gh.Deployment, error)
-	CreateDeployment(repo, ref, environment string) (*gh.Deployment, error)
-	CreateDeploymentStatus(repo string, deploymentID int64, state string, environmentURL string, autoInactive bool) error
 	CreateCommitStatus(repo, sha, state, targetURL, context, description string) error
-	DeleteDeployment(repo string, deploymentID int64) error
-	DeleteEnvironment(repo, name string) error
 	RemoveLabel(repo string, number int, label string) error
 	ListIssueComments(repo string, number int) ([]*gh.IssueComment, error)
 	CreateIssueComment(repo string, number int, body string) error
@@ -143,19 +136,7 @@ func runScheduledCleanup(repo string, opts GithubSyncOptions, provider Provider,
 	if logger != nil {
 		logger.Infof("[clear_dangling_deployments] start")
 	}
-	if err := clearDanglingDeployments(repo, opts, provider, client, logger); err != nil {
-		return err
-	}
-	if logger != nil {
-		logger.Infof("[clear_outdated_environments] start")
-	}
-	if err := clearOutdatedEnvironments(repo, opts, provider, client, logger); err != nil {
-		return err
-	}
-	if logger != nil {
-		logger.Infof("[clear_outdated_environments] end")
-	}
-	return nil
+	return clearDanglingDeployments(repo, opts, provider, client, logger)
 }
 
 func prExpired(updatedAt time.Time, ttl string) bool {
@@ -218,56 +199,6 @@ func clearDanglingDeployments(repo string, opts GithubSyncOptions, provider Prov
 	return nil
 }
 
-func clearOutdatedEnvironments(repo string, opts GithubSyncOptions, provider Provider, client GitHubAPI, logger *Logger) error {
-	envs, err := client.ListEnvironments(repo)
-	if err != nil {
-		return err
-	}
-	issues, err := client.ListIssues(repo, opts.Label)
-	if err != nil {
-		return err
-	}
-	labelledPRs := map[int]struct{}{}
-	for _, issue := range issues {
-		if issue.PullRequestLinks != nil {
-			labelledPRs[issue.GetNumber()] = struct{}{}
-		}
-	}
-	toRemove := []string{}
-	for _, env := range envs {
-		name := env.GetName()
-		prNumber := parsePRNumber(name)
-		if prNumber == 0 {
-			continue
-		}
-		if _, ok := labelledPRs[prNumber]; ok {
-			continue
-		}
-		toRemove = append(toRemove, name)
-	}
-	if logger != nil {
-		logger.Warnf("[clear_outdated_environments] Found %d environments to remove: %v.", len(toRemove), toRemove)
-	}
-	for _, env := range toRemove {
-		if logger != nil {
-			logger.Warnf("[clear_outdated_environments] Deleting environment %s...", env)
-		}
-		destroyEnvironment(repo, env, client, logger)
-		time.Sleep(5 * time.Second)
-	}
-	return nil
-}
-
-func parsePRNumber(env string) int {
-	parts := strings.Split(env, "-")
-	for i := 0; i < len(parts)-1; i++ {
-		if parts[i] == "pr" {
-			return mustParseInt(parts[i+1])
-		}
-	}
-	return 0
-}
-
 func mustParseInt(value string) int {
 	result := 0
 	for _, r := range value {
@@ -277,23 +208,6 @@ func mustParseInt(value string) int {
 		result = result*10 + int(r-'0')
 	}
 	return result
-}
-
-func destroyEnvironment(repo, environment string, client GitHubAPI, logger *Logger) {
-	deploys, err := client.ListDeployments(repo, environment, "")
-	if err == nil {
-		for _, dep := range deploys {
-			_ = client.CreateDeploymentStatus(repo, dep.GetID(), "inactive", "", true)
-		}
-		for _, dep := range deploys {
-			_ = client.DeleteDeployment(repo, dep.GetID())
-		}
-	}
-	if err := client.DeleteEnvironment(repo, environment); err != nil {
-		if logger != nil {
-			logger.Warnf("Unable to destroy environment %s: %v. This usually means the token lacks environment admin permission. Provide a stronger github_token input or delete it manually.", environment, err)
-		}
-	}
 }
 
 func eventFromPR(pr *gh.PullRequest) GitHubEvent {
@@ -460,23 +374,6 @@ func (g *GithubSync) commitStatusFor(status deploymentStatus) string {
 	}
 }
 
-func (g *GithubSync) deploymentStatusFor(status deploymentStatus) string {
-	switch status {
-	case statusError:
-		return "error"
-	case statusDeployed:
-		return "success"
-	case statusDestroyed:
-		return "inactive"
-	case statusDeploying:
-		return "pending"
-	case statusDestroying:
-		return ""
-	default:
-		return ""
-	}
-}
-
 func (g *GithubSync) updateGitHubStatus(status deploymentStatus, url string) error {
 	commitStatus := g.commitStatusFor(status)
 	context := "PullPreview"
@@ -489,24 +386,11 @@ func (g *GithubSync) updateGitHubStatus(status deploymentStatus, url string) err
 	}
 	_ = g.client.CreateCommitStatus(g.repo(), g.sha(), commitStatus, url, context, description)
 	g.updatePRComment(status, url)
-
-	deploymentStatus := g.deploymentStatusFor(status)
-	if deploymentStatus == "" {
-		return nil
-	}
-	if g.logger != nil {
-		g.logger.Infof("Setting deployment status repo=%s branch=%s sha=%s status=%s", g.repo(), g.branch(), g.sha(), deploymentStatus)
-	}
-	deployment := g.deployment()
-	_ = g.client.CreateDeploymentStatus(g.repo(), deployment.GetID(), deploymentStatus, url, true)
-	if status == statusDestroyed {
-		destroyEnvironment(g.repo(), g.instanceName(), g.client, g.logger)
-	}
 	return nil
 }
 
 func (g *GithubSync) updatePRComment(status deploymentStatus, previewURL string) {
-	if !g.opts.CommentPR || g.prNumber() == 0 {
+	if g.prNumber() == 0 {
 		return
 	}
 	body := g.renderPRComment(status, previewURL)
@@ -616,19 +500,6 @@ func (g *GithubSync) renderPRComment(status deploymentStatus, previewURL string)
 	)
 }
 
-func (g *GithubSync) deploymentEnvironmentURL() string {
-	server := strings.TrimSuffix(os.Getenv("GITHUB_SERVER_URL"), "/")
-	if server == "" {
-		return ""
-	}
-	return fmt.Sprintf(
-		"%s/%s/deployments/activity_log?environment=%s",
-		server,
-		g.repo(),
-		url.QueryEscape(g.instanceName()),
-	)
-}
-
 func (g *GithubSync) statusSummaryText(status deploymentStatus) string {
 	switch status {
 	case statusDeploying:
@@ -662,9 +533,6 @@ func (g *GithubSync) renderStepSummary(status deploymentStatus, action actionTyp
 
 	if strings.TrimSpace(previewURL) != "" {
 		b.WriteString(fmt.Sprintf("- Preview URL: [%s](%s)\n", previewURL, previewURL))
-	}
-	if deploymentURL := g.deploymentEnvironmentURL(); deploymentURL != "" {
-		b.WriteString(fmt.Sprintf("- Deployment: [%s](%s)\n", g.instanceName(), deploymentURL))
 	}
 	if logs := g.workflowRunURL(); logs != "" {
 		b.WriteString(fmt.Sprintf("- Logs: [%s](%s)\n", logs, logs))
@@ -709,18 +577,6 @@ func (g *GithubSync) workflowRunURL() string {
 		return ""
 	}
 	return fmt.Sprintf("%s/%s/actions/runs/%s", server, g.repo(), runID)
-}
-
-func (g *GithubSync) deployment() *gh.Deployment {
-	if g.prCache != nil {
-		_ = g.prCache
-	}
-	deploys, err := g.client.ListDeployments(g.repo(), g.instanceName(), g.sha())
-	if err == nil && len(deploys) > 0 {
-		return deploys[0]
-	}
-	dep, _ := g.client.CreateDeployment(g.repo(), g.sha(), g.instanceName())
-	return dep
 }
 
 func (g *GithubSync) orgName() string {

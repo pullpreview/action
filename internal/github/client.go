@@ -50,50 +50,6 @@ func (c *Client) GetPullRequest(repo string, number int) (*gh.PullRequest, error
 	return pr, err
 }
 
-func (c *Client) ListEnvironments(repo string) ([]*gh.Environment, error) {
-	owner, name := splitRepo(repo)
-	envs, _, err := c.api.Repositories.ListEnvironments(c.ctx, owner, name, &gh.EnvironmentListOptions{
-		ListOptions: gh.ListOptions{PerPage: 100},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return envs.Environments, nil
-}
-
-func (c *Client) ListDeployments(repo, environment, ref string) ([]*gh.Deployment, error) {
-	owner, name := splitRepo(repo)
-	opts := &gh.DeploymentsListOptions{Environment: environment}
-	if ref != "" {
-		opts.Ref = ref
-	}
-	deploys, _, err := c.api.Repositories.ListDeployments(c.ctx, owner, name, opts)
-	return deploys, err
-}
-
-func (c *Client) CreateDeployment(repo, ref, environment string) (*gh.Deployment, error) {
-	owner, name := splitRepo(repo)
-	requiredContexts := []string{}
-	req := &gh.DeploymentRequest{
-		Ref:              gh.String(ref),
-		AutoMerge:        gh.Bool(false),
-		Environment:      gh.String(environment),
-		RequiredContexts: &requiredContexts,
-	}
-	deployment, _, err := c.api.Repositories.CreateDeployment(c.ctx, owner, name, req)
-	return deployment, err
-}
-
-func (c *Client) CreateDeploymentStatus(repo string, deploymentID int64, state string, environmentURL string, autoInactive bool) error {
-	owner, name := splitRepo(repo)
-	request := &gh.DeploymentStatusRequest{State: gh.String(state), AutoInactive: gh.Bool(autoInactive)}
-	if environmentURL != "" {
-		request.EnvironmentURL = gh.String(environmentURL)
-	}
-	_, _, err := c.api.Repositories.CreateDeploymentStatus(c.ctx, owner, name, deploymentID, request)
-	return err
-}
-
 func (c *Client) CreateCommitStatus(repo, sha, state, targetURL, statusContext, description string) error {
 	owner, name := splitRepo(repo)
 	status := &gh.RepoStatus{State: gh.String(state), Context: gh.String(statusContext), Description: gh.String(description)}
@@ -101,18 +57,6 @@ func (c *Client) CreateCommitStatus(repo, sha, state, targetURL, statusContext, 
 		status.TargetURL = gh.String(targetURL)
 	}
 	_, _, err := c.api.Repositories.CreateStatus(c.ctx, owner, name, sha, status)
-	return err
-}
-
-func (c *Client) DeleteDeployment(repo string, deploymentID int64) error {
-	owner, name := splitRepo(repo)
-	_, err := c.api.Repositories.DeleteDeployment(c.ctx, owner, name, deploymentID)
-	return err
-}
-
-func (c *Client) DeleteEnvironment(repo, name string) error {
-	owner, repoName := splitRepo(repo)
-	_, err := c.api.Repositories.DeleteEnvironment(c.ctx, owner, repoName, name)
 	return err
 }
 

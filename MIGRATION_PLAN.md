@@ -30,10 +30,10 @@
    - Lightsail launch/restore, firewall setup, SSH readiness, tarball deploy, update/pre-script execution
 3. Ported GitHub orchestration:
    - event-driven deploy/destroy/cleanup logic
-   - commit + deployment statuses
+   - commit statuses + PR status comments
 4. Added PR comment support:
-   - optional (`comment_pr`, default `true`)
-   - building/ready/error comment updates
+   - always enabled
+   - building/ready/error/destroyed comment updates
 5. Added deploy heartbeat logging:
    - includes URL, SSH command, authorized users, and key-upload confirmation
 6. Removed obsolete runtime artifacts:

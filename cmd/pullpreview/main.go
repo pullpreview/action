@@ -114,7 +114,6 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 	deploymentVariant := fs.String("deployment-variant", "", "Deployment variant (4 chars max)")
 	alwaysOn := fs.String("always-on", "", "List of branches to always deploy")
 	ttl := fs.String("ttl", "infinite", "Maximum time to live for deployments (e.g. 10h, 5d, infinite)")
-	commentPR := fs.Bool("comment-pr", true, "Whether to post/update pull request comments while deployment is building/ready/error")
 	commonFlags := registerCommonFlags(fs)
 	leadingPath, parseArgs := splitLeadingPositional(args)
 	fs.Parse(parseArgs)
@@ -136,7 +135,6 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 		AlwaysOn:          splitCommaList(*alwaysOn),
 		DeploymentVariant: *deploymentVariant,
 		TTL:               *ttl,
-		CommentPR:         *commentPR,
 		Context:           ctx,
 		Common:            commonFlags.ToOptions(ctx),
 	}

@@ -5,6 +5,11 @@ A GitHub Action that starts live environments for your pull requests and branche
 [![pullpreview](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml/badge.svg)](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml)
 <a href="https://news.ycombinator.com/item?id=23221471"><img src="https://img.shields.io/badge/Hacker%20News-83-%23FF6600" alt="Hacker News"></a>
 
+## Breaking change (Go runtime)
+
+- GitHub Deployments/Environments integration has been removed.
+- `comment_pr` has been removed; PullPreview PR status comments are now always enabled.
+
 ## Spin environments in one click
 
 Once installed in your repository, this action is triggered any time a change
@@ -54,9 +59,8 @@ Preview environments that:
   a GitHub Action, which means your code never leaves GitHub or your Lightsail
   instances.
 
-- make the preview URL **easy to find** for your reviewers: Deployment statuses
-  and URLs are visible in the PR checks section, and on the Deployments tab in
-  the GitHub UI.
+- make the preview URL **easy to find** for your reviewers: Commit statuses
+  and marker-based PR comments are updated with live preview state and URL.
 
 - **persist state** across deploys: Any state stored in docker volumes (e.g.
   database data) will be persisted across deploys, making the life of reviewers
@@ -73,8 +77,7 @@ Preview environments that:
 
 - are **integrated into the GitHub UI**: Logs for each deployment run are
   available within the Actions section, and direct links to the preview
-  environments are available in the Checks section of a PR, and in the
-  Deployments tab of the repository.
+  environments are available in commit statuses and PullPreview PR comments.
 
 <img src="img/4-view-logs.png" />
 <img src="img/8-list-deployments.png" />

@@ -48,22 +48,19 @@ Supported commands:
 ## GitHub sync behavior (`github-sync`)
 - Handles PR labeled/opened/reopened/synchronize/unlabeled/closed events.
 - Handles push events for `always_on` branches.
-- Handles scheduled cleanup of dangling deployments/environments.
-- Updates commit statuses and deployment statuses.
+- Handles scheduled cleanup of dangling labeled preview instances.
+- Updates commit statuses.
 - For `admins: "@collaborators/push"`:
   - loads collaborators from GitHub REST API with `affiliation=all` + `permission=push`
   - uses only the first page (up to 100 users)
   - emits a warning if additional pages exist
   - fetches each admin's SSH public keys via GitHub API and forwards keys to the instance
   - uses local key cache directory (`PULLPREVIEW_SSH_KEYS_CACHE_DIR`) to avoid refetching keys across runs
-- Optional PR status comments:
-  - controlled by input `comment_pr` (default `true`)
-  - posts/updates a single marker-based comment per environment with building/ready/error state and preview URL.
+- Always posts/updates marker-based PR status comments per environment/job with building/ready/error/destroyed state and preview URL.
 
 ## Action inputs/outputs
 - Existing inputs are preserved.
 - Additional input:
-  - `comment_pr` (`true`/`false`, default `true`)
   - `proxy_tls` (`service:port`, default empty)
 - Outputs:
   - `url`
