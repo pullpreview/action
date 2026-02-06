@@ -35,7 +35,7 @@ dist-commit:
 	fi
 
 clean-dist:
-	rm -f $(DIST_DIR)/$(BIN_NAME)-linux-amd64 $(DIST_DIR)/$(BIN_NAME)-linux-arm64
+	rm -f $(DIST_DIR)/$(BIN_NAME)-linux-amd64
 
 test:
 	$(GO) test ./...
