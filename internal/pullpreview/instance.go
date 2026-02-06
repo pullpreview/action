@@ -226,21 +226,6 @@ func (i *Instance) SetupSSHAccess() error {
 	return i.SCP(bytes.NewBufferString(content), fmt.Sprintf("/home/%s/.ssh/authorized_keys", i.Username()), "0600")
 }
 
-func (i *Instance) SetupUpdateScript() error {
-	script, err := RenderUpdateScript(UpdateScriptData{
-		RemoteAppPath:  remoteAppPath,
-		ComposeFiles:   strings.Join(i.ComposeFiles, ":"),
-		ComposeOptions: strings.Join(i.ComposeOptions, " "),
-		PublicIP:       i.PublicIP(),
-		PublicDNS:      i.PublicDNS(),
-		URL:            i.URL(),
-	})
-	if err != nil {
-		return err
-	}
-	return i.SCP(bytes.NewBufferString(script), "/tmp/update_script.sh", "0755")
-}
-
 func (i *Instance) SetupPreScript() error {
 	script := BuildPreScript(i.Registries, i.PreScript, i.Logger)
 	return i.SCP(bytes.NewBufferString(script), "/tmp/pre_script.sh", "0755")
@@ -333,17 +318,8 @@ func (i *Instance) EnsureRemoteAuthorizedKeysOwner() error {
 	return i.SSH(command, nil)
 }
 
-func (i *Instance) UpdateFromTarball(tarballPath string) error {
-	remotePath := fmt.Sprintf("/tmp/app-%d.tar.gz", time.Now().UTC().Unix())
-	file, err := os.Open(tarballPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err := i.SCP(file, remotePath, "0644"); err != nil {
-		return err
-	}
-	return i.SSH(fmt.Sprintf("/tmp/update_script.sh %s", remotePath), nil)
+func (i *Instance) UpdateFromTarball(appPath, tarballPath string) error {
+	return i.DeployWithDockerContext(appPath, tarballPath)
 }
 
 func (i *Instance) SetupScripts() error {
@@ -351,9 +327,6 @@ func (i *Instance) SetupScripts() error {
 		return err
 	}
 	if err := i.EnsureRemoteAuthorizedKeysOwner(); err != nil {
-		return err
-	}
-	if err := i.SetupUpdateScript(); err != nil {
 		return err
 	}
 	if err := i.SetupPreScript(); err != nil {

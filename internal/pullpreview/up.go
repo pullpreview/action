@@ -71,7 +71,7 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 		}
 	}
 
-	if err := instance.UpdateFromTarball(tarball); err != nil {
+	if err := instance.UpdateFromTarball(appPath, tarball); err != nil {
 		close(stop)
 		return nil, err
 	}
