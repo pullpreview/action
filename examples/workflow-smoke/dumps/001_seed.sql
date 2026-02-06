@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS seed_data (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  label VARCHAR(255) NOT NULL
+);
+
+INSERT INTO seed_data (label) VALUES ('persisted');
