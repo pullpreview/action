@@ -186,9 +186,6 @@ func (i *Instance) PortsWithDefaults() []string {
 		}
 		ports = append(ports, port)
 	}
-	if strings.TrimSpace(i.ProxyTLS) != "" {
-		ports = append(ports, "443")
-	}
 	ports = append(ports, i.DefaultPort, "22")
 	return uniqueStrings(ports)
 }
