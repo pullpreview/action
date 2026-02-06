@@ -47,15 +47,19 @@ func runUp(args []string, logger *pullpreview.Logger) {
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	name := fs.String("name", "", "Unique name for the environment (optional for local use)")
 	commonFlags := registerCommonFlags(fs)
-	fs.Parse(args)
+	leadingPath, parseArgs := splitLeadingPositional(args)
+	fs.Parse(parseArgs)
 	if *verbose {
 		logger.SetLevel(pullpreview.LevelDebug)
 	}
-	if fs.NArg() == 0 {
+	appPath := strings.TrimSpace(leadingPath)
+	if appPath == "" && fs.NArg() > 0 {
+		appPath = fs.Arg(0)
+	}
+	if appPath == "" {
 		fmt.Println("Usage: pullpreview up path/to/app [--name <name>]")
 		os.Exit(1)
 	}
-	appPath := fs.Arg(0)
 	if strings.TrimSpace(*name) == "" {
 		*name = defaultUpName(appPath)
 	}
@@ -106,15 +110,19 @@ func runGithubSync(args []string, logger *pullpreview.Logger) {
 	alwaysOn := fs.String("always-on", "", "List of branches to always deploy")
 	ttl := fs.String("ttl", "infinite", "Maximum time to live for deployments (e.g. 10h, 5d, infinite)")
 	commonFlags := registerCommonFlags(fs)
-	fs.Parse(args)
+	leadingPath, parseArgs := splitLeadingPositional(args)
+	fs.Parse(parseArgs)
 	if *verbose {
 		logger.SetLevel(pullpreview.LevelDebug)
 	}
-	if fs.NArg() == 0 {
+	appPath := strings.TrimSpace(leadingPath)
+	if appPath == "" && fs.NArg() > 0 {
+		appPath = fs.Arg(0)
+	}
+	if appPath == "" {
 		fmt.Println("Usage: pullpreview github-sync path/to/app [options]")
 		os.Exit(1)
 	}
-	appPath := fs.Arg(0)
 	provider := mustProvider(logger)
 	opts := pullpreview.GithubSyncOptions{
 		AppPath:           appPath,
@@ -135,12 +143,17 @@ func runList(args []string, logger *pullpreview.Logger) {
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	org := fs.String("org", "", "Restrict to given organization name")
 	repo := fs.String("repo", "", "Restrict to given repository name")
-	fs.Parse(args)
+	leadingTarget, parseArgs := splitLeadingPositional(args)
+	fs.Parse(parseArgs)
 	if *verbose {
 		logger.SetLevel(pullpreview.LevelDebug)
 	}
-	if fs.NArg() > 0 {
-		parts := strings.SplitN(fs.Arg(0), "/", 2)
+	target := strings.TrimSpace(leadingTarget)
+	if target == "" && fs.NArg() > 0 {
+		target = fs.Arg(0)
+	}
+	if target != "" {
+		parts := strings.SplitN(target, "/", 2)
 		if len(parts) > 0 {
 			*org = parts[0]
 		}
@@ -231,6 +244,17 @@ func parseTags(values []string) map[string]string {
 		}
 	}
 	return result
+}
+
+func splitLeadingPositional(args []string) (string, []string) {
+	if len(args) == 0 {
+		return "", args
+	}
+	first := strings.TrimSpace(args[0])
+	if first == "" || strings.HasPrefix(first, "-") {
+		return "", args
+	}
+	return first, args[1:]
 }
 
 func mustProvider(logger *pullpreview.Logger) pullpreview.Provider {

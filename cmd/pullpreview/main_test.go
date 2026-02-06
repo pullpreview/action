@@ -31,3 +31,23 @@ func TestParseTags(t *testing.T) {
 		t.Fatalf("unexpected tags: %#v", got)
 	}
 }
+
+func TestSplitLeadingPositional(t *testing.T) {
+	first, rest := splitLeadingPositional([]string{"examples/wordpress", "--registries", "docker://token@ghcr.io"})
+	if first != "examples/wordpress" {
+		t.Fatalf("unexpected first positional: %q", first)
+	}
+	if len(rest) != 2 || rest[0] != "--registries" {
+		t.Fatalf("unexpected remaining args: %#v", rest)
+	}
+}
+
+func TestSplitLeadingPositionalWhenFlagsFirst(t *testing.T) {
+	first, rest := splitLeadingPositional([]string{"--registries", "docker://token@ghcr.io", "examples/wordpress"})
+	if first != "" {
+		t.Fatalf("expected no leading positional when flags are first, got %q", first)
+	}
+	if len(rest) != 3 {
+		t.Fatalf("unexpected remaining args: %#v", rest)
+	}
+}
