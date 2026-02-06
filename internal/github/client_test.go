@@ -88,30 +88,6 @@ func TestGetPullRequest(t *testing.T) {
 	}
 }
 
-func TestCreateCommitStatus(t *testing.T) {
-	var createCommitStatusBody string
-
-	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/repos/org/repo/statuses/sha123":
-			body, _ := io.ReadAll(r.Body)
-			createCommitStatusBody = string(body)
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":8}`))
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	})
-
-	err := client.CreateCommitStatus("org/repo", "sha123", "pending", "https://example.test", "PullPreview", "Environment deploying")
-	if err != nil {
-		t.Fatalf("CreateCommitStatus() error: %v", err)
-	}
-	if !strings.Contains(createCommitStatusBody, `"state":"pending"`) || !strings.Contains(createCommitStatusBody, `"context":"PullPreview"`) {
-		t.Fatalf("unexpected create commit status body: %s", createCommitStatusBody)
-	}
-}
-
 func TestDeleteOperations(t *testing.T) {
 	calls := map[string]bool{}
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

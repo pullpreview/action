@@ -59,8 +59,8 @@ Preview environments that:
   a GitHub Action, which means your code never leaves GitHub or your Lightsail
   instances.
 
-- make the preview URL **easy to find** for your reviewers: Commit statuses
-  and marker-based PR comments are updated with live preview state and URL.
+- make the preview URL **easy to find** for your reviewers: Marker-based PR
+  comments are updated with live preview state and URL.
 
 - **persist state** across deploys: Any state stored in docker volumes (e.g.
   database data) will be persisted across deploys, making the life of reviewers
@@ -77,7 +77,7 @@ Preview environments that:
 
 - are **integrated into the GitHub UI**: Logs for each deployment run are
   available within the Actions section, and direct links to the preview
-  environments are available in commit statuses and PullPreview PR comments.
+  environments are available in PullPreview PR comments.
 
 <img src="img/4-view-logs.png" />
 <img src="img/8-list-deployments.png" />

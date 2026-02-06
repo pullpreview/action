@@ -50,16 +50,6 @@ func (c *Client) GetPullRequest(repo string, number int) (*gh.PullRequest, error
 	return pr, err
 }
 
-func (c *Client) CreateCommitStatus(repo, sha, state, targetURL, statusContext, description string) error {
-	owner, name := splitRepo(repo)
-	status := &gh.RepoStatus{State: gh.String(state), Context: gh.String(statusContext), Description: gh.String(description)}
-	if targetURL != "" {
-		status.TargetURL = gh.String(targetURL)
-	}
-	_, _, err := c.api.Repositories.CreateStatus(c.ctx, owner, name, sha, status)
-	return err
-}
-
 func (c *Client) RemoveLabel(repo string, number int, label string) error {
 	owner, name := splitRepo(repo)
 	_, err := c.api.Issues.RemoveLabelForIssue(c.ctx, owner, name, number, label)

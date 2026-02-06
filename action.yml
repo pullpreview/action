@@ -22,7 +22,7 @@ inputs:
     description: "Label to use for triggering preview deployments"
     default: "pullpreview"
   github_token:
-    description: "The GitHub access token used to perform GitHub API operations (statuses, labels, comments)."
+    description: "The GitHub access token used to perform GitHub API operations (labels, comments, collaborator/keys lookup)."
     default: "${{ github.token }}"
   admins:
     description: "Logins of GitHub users that will have their SSH key installed on the instance, comma-separated"

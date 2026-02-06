@@ -27,7 +27,6 @@ var (
 type GitHubAPI interface {
 	ListIssues(repo, label string) ([]*gh.Issue, error)
 	GetPullRequest(repo string, number int) (*gh.PullRequest, error)
-	CreateCommitStatus(repo, sha, state, targetURL, context, description string) error
 	RemoveLabel(repo string, number int, label string) error
 	ListIssueComments(repo string, number int) ([]*gh.IssueComment, error)
 	CreateIssueComment(repo string, number int, body string) error
@@ -361,30 +360,7 @@ func (g *GithubSync) guessAction() actionType {
 	return actionIgnored
 }
 
-func (g *GithubSync) commitStatusFor(status deploymentStatus) string {
-	switch status {
-	case statusError:
-		return "error"
-	case statusDeployed, statusDestroyed:
-		return "success"
-	case statusDeploying, statusDestroying:
-		return "pending"
-	default:
-		return "pending"
-	}
-}
-
 func (g *GithubSync) updateGitHubStatus(status deploymentStatus, url string) error {
-	commitStatus := g.commitStatusFor(status)
-	context := "PullPreview"
-	if g.deploymentVariant() != "" {
-		context = fmt.Sprintf("PullPreview - %s", g.deploymentVariant())
-	}
-	description := fmt.Sprintf("Environment %s", status)
-	if g.logger != nil {
-		g.logger.Infof("Setting commit status repo=%s sha=%s status=%s", g.repo(), g.sha(), commitStatus)
-	}
-	_ = g.client.CreateCommitStatus(g.repo(), g.sha(), commitStatus, url, context, description)
 	g.updatePRComment(status, url)
 	return nil
 }

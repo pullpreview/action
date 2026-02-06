@@ -49,7 +49,7 @@ Supported commands:
 - Handles PR labeled/opened/reopened/synchronize/unlabeled/closed events.
 - Handles push events for `always_on` branches.
 - Handles scheduled cleanup of dangling labeled preview instances.
-- Updates commit statuses.
+- Updates marker-based PR status comments.
 - For `admins: "@collaborators/push"`:
   - loads collaborators from GitHub REST API with `affiliation=all` + `permission=push`
   - uses only the first page (up to 100 users)

@@ -13,8 +13,6 @@ import (
 
 type fakeGitHub struct {
 	latestSHA         string
-	commitStatuses    []string
-	commitStatusURLs  []string
 	pullRequestsByRef map[string][]*gh.PullRequest
 	pullRequestsByNum map[int]*gh.PullRequest
 	issues            []*gh.Issue
@@ -35,12 +33,6 @@ func (f *fakeGitHub) GetPullRequest(repo string, number int) (*gh.PullRequest, e
 		return nil, nil
 	}
 	return f.pullRequestsByNum[number], nil
-}
-
-func (f *fakeGitHub) CreateCommitStatus(repo, sha, state, targetURL, context, description string) error {
-	f.commitStatuses = append(f.commitStatuses, state)
-	f.commitStatusURLs = append(f.commitStatusURLs, targetURL)
-	return nil
 }
 
 func (f *fakeGitHub) RemoveLabel(repo string, number int, label string) error {
@@ -208,12 +200,6 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	if !upCalled {
 		t.Fatalf("expected runUp to be called")
 	}
-	if len(client.commitStatuses) < 2 {
-		t.Fatalf("expected at least two commit statuses, got %v", client.commitStatuses)
-	}
-	if client.commitStatuses[0] != "pending" || client.commitStatuses[len(client.commitStatuses)-1] != "success" {
-		t.Fatalf("unexpected commit statuses: %v", client.commitStatuses)
-	}
 	if len(client.createdComments) != 1 {
 		t.Fatalf("expected initial PR comment creation, got %d", len(client.createdComments))
 	}
@@ -228,7 +214,7 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	}
 }
 
-func TestSyncLabeledProxyTLSUsesHTTPSURLInStatusAndComment(t *testing.T) {
+func TestSyncLabeledProxyTLSUsesHTTPSURLInComment(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
 	t.Setenv("GITHUB_RUN_ID", "12345")
@@ -242,20 +228,6 @@ func TestSyncLabeledProxyTLSUsesHTTPSURLInStatusAndComment(t *testing.T) {
 
 	if err := sync.Sync(); err != nil {
 		t.Fatalf("Sync() returned error: %v", err)
-	}
-	if len(client.commitStatusURLs) == 0 {
-		t.Fatalf("expected commit status URLs to be recorded")
-	}
-
-	foundHTTPS := false
-	for _, value := range client.commitStatusURLs {
-		if strings.HasPrefix(value, "https://") {
-			foundHTTPS = true
-			break
-		}
-	}
-	if !foundHTTPS {
-		t.Fatalf("expected at least one https commit status URL, got %v", client.commitStatusURLs)
 	}
 	if len(client.updatedComments) == 0 {
 		t.Fatalf("expected PR comment update on deployed state")

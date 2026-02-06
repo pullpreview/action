@@ -14,7 +14,6 @@ concurrency: ${{ github.ref }}
 permissions:
   contents: read # to fetch code (actions/checkout)
   pull-requests: write # to remove labels / write PR comments
-  statuses: write # to create commit status
 
 jobs:
   deploy_smoke_1:
