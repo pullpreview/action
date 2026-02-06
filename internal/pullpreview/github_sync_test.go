@@ -289,6 +289,8 @@ func TestSyncLabeledProxyTLSUsesHTTPSURLInStatusAndComment(t *testing.T) {
 
 func TestSyncClosedPRRunsDownAndRemovesLabel(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
+	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
+	t.Setenv("GITHUB_RUN_ID", "12345")
 	event := GitHubEvent{
 		Action: "closed",
 		PullRequest: &GitHubPR{
@@ -302,7 +304,7 @@ func TestSyncClosedPRRunsDownAndRemovesLabel(t *testing.T) {
 	}
 	client := &fakeGitHub{latestSHA: "abc"}
 	downCalled := false
-	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, client, fakeProvider{running: true})
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, client, fakeProvider{running: true})
 	sync.runDown = func(opts DownOptions, provider Provider, logger *Logger) error {
 		downCalled = true
 		return nil
@@ -315,6 +317,18 @@ func TestSyncClosedPRRunsDownAndRemovesLabel(t *testing.T) {
 	}
 	if len(client.removedLabels) == 0 || client.removedLabels[0] != "pullpreview" {
 		t.Fatalf("expected pullpreview label removal, got %v", client.removedLabels)
+	}
+	if len(client.createdComments) != 1 {
+		t.Fatalf("expected a destroying PR comment to be created")
+	}
+	if !strings.Contains(client.createdComments[0], "🧹 Destroying preview...") {
+		t.Fatalf("unexpected destroying PR comment body: %q", client.createdComments[0])
+	}
+	if len(client.updatedComments) == 0 {
+		t.Fatalf("expected destroyed PR comment update")
+	}
+	if !strings.Contains(client.updatedComments[len(client.updatedComments)-1], "🗑️ Preview destroyed") {
+		t.Fatalf("unexpected destroyed PR comment body: %q", client.updatedComments[len(client.updatedComments)-1])
 	}
 }
 
@@ -418,6 +432,21 @@ func TestRenderPRCommentForErrorState(t *testing.T) {
 	body := sync.renderPRComment(statusError, "")
 	if !strings.Contains(body, "❌ Deploy failed") {
 		t.Fatalf("unexpected error comment body: %q", body)
+	}
+	if !strings.Contains(body, sync.prCommentMarker()) {
+		t.Fatalf("missing marker in rendered comment")
+	}
+}
+
+func TestRenderPRCommentForDestroyedState(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
+	body := sync.renderPRComment(statusDestroyed, "")
+	if !strings.Contains(body, "🗑️ Preview destroyed") {
+		t.Fatalf("unexpected destroyed comment body: %q", body)
+	}
+	if !strings.Contains(body, "| Preview URL | _Destroyed_ |") {
+		t.Fatalf("expected destroyed preview marker in comment body: %q", body)
 	}
 	if !strings.Contains(body, sync.prCommentMarker()) {
 		t.Fatalf("missing marker in rendered comment")
