@@ -2,26 +2,14 @@ package pullpreview
 
 import (
 	"bytes"
-	"context"
-	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
-
-	composecli "github.com/compose-spec/compose-go/v2/cli"
-	composetypes "github.com/compose-spec/compose-go/v2/types"
-	dockercommand "github.com/docker/cli/cli/command"
-	dockerconfig "github.com/docker/cli/cli/config/configfile"
-	dockercfgtypes "github.com/docker/cli/cli/config/types"
-	"github.com/docker/cli/cli/connhelper"
-	dockerflags "github.com/docker/cli/cli/flags"
-	composeapi "github.com/docker/compose/v2/pkg/api"
-	composeservice "github.com/docker/compose/v2/pkg/compose"
-	dockerclient "github.com/docker/docker/client"
 )
 
 const (
@@ -40,11 +28,11 @@ func (i *Instance) DeployWithDockerContext(appPath, tarballPath string) error {
 		return err
 	}
 
-	project, err := i.composeProjectForRemoteContext(appPath)
+	composeConfig, err := i.composeConfigForRemoteContext(appPath)
 	if err != nil {
 		return err
 	}
-	return i.runComposeOnRemoteContext(project)
+	return i.runComposeOnRemoteContext(composeConfig)
 }
 
 func (i *Instance) syncRemoteAppFromTarball(tarballPath string) error {
@@ -95,82 +83,82 @@ func (i *Instance) runRemotePreScript() error {
 	return i.SSH(command, nil)
 }
 
-func (i *Instance) composeProjectForRemoteContext(appPath string) (*composetypes.Project, error) {
+func (i *Instance) composeConfigForRemoteContext(appPath string) ([]byte, error) {
 	absAppPath, err := filepath.Abs(appPath)
 	if err != nil {
 		return nil, err
 	}
 
-	configPaths := make([]string, 0, len(i.ComposeFiles))
+	args := []string{"compose"}
 	for _, composeFile := range i.ComposeFiles {
 		pathValue := composeFile
 		if !filepath.IsAbs(pathValue) {
 			pathValue = filepath.Join(absAppPath, composeFile)
 		}
-		configPaths = append(configPaths, pathValue)
+		args = append(args, "-f", pathValue)
+	}
+	args = append(args, "config", "--format", "json")
+
+	cmd := exec.Command("docker", args...)
+	cmd.Dir = absAppPath
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("unable to render compose config: %w (%s)", err, strings.TrimSpace(stderr.String()))
 	}
 
-	projectOptions, err := composecli.NewProjectOptions(
-		configPaths,
-		composecli.WithWorkingDirectory(absAppPath),
-		composecli.WithOsEnv,
-		composecli.WithEnv([]string{"PWD=" + absAppPath}),
-		composecli.WithDotEnv,
-		composecli.WithDefaultProfiles(),
-		composecli.WithName(dockerProjectName),
-		composecli.WithResolvedPaths(true),
-	)
+	rewritten, err := rewriteRelativeBindSources(stdout.Bytes(), absAppPath, remoteAppPath)
 	if err != nil {
-		return nil, fmt.Errorf("unable to initialize compose loader: %w", err)
-	}
-
-	project, err := projectOptions.LoadProject(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("unable to load compose project: %w", err)
-	}
-	if project.Name == "" {
-		project.Name = dockerProjectName
-	}
-	if err := rewriteProjectBindSources(project, absAppPath, remoteAppPath); err != nil {
 		return nil, err
 	}
-	setComposeProjectLabels(project)
-	return project, nil
+	return rewritten, nil
 }
 
-func setComposeProjectLabels(project *composetypes.Project) {
-	for serviceName, service := range project.Services {
-		if service.CustomLabels == nil {
-			service.CustomLabels = composetypes.Labels{}
-		}
-		service.CustomLabels[composeapi.ProjectLabel] = project.Name
-		service.CustomLabels[composeapi.ServiceLabel] = serviceName
-		service.CustomLabels[composeapi.VersionLabel] = composeapi.ComposeVersion
-		service.CustomLabels[composeapi.WorkingDirLabel] = project.WorkingDir
-		service.CustomLabels[composeapi.ConfigFilesLabel] = strings.Join(project.ComposeFiles, ",")
-		service.CustomLabels[composeapi.OneoffLabel] = "False"
-		project.Services[serviceName] = service
+func rewriteRelativeBindSources(composeConfigJSON []byte, absAppPath, remoteRoot string) ([]byte, error) {
+	var config map[string]any
+	if err := json.Unmarshal(composeConfigJSON, &config); err != nil {
+		return nil, fmt.Errorf("unable to parse compose config: %w", err)
 	}
-}
 
-func rewriteProjectBindSources(project *composetypes.Project, absAppPath, remoteRoot string) error {
-	for serviceName, service := range project.Services {
-		for idx, volume := range service.Volumes {
-			if strings.ToLower(volume.Type) != composetypes.VolumeTypeBind {
+	rawServices, ok := config["services"].(map[string]any)
+	if !ok {
+		return composeConfigJSON, nil
+	}
+
+	for serviceName, rawService := range rawServices {
+		service, ok := rawService.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawVolumes, ok := service["volumes"].([]any)
+		if !ok {
+			continue
+		}
+
+		for _, rawVolume := range rawVolumes {
+			volume, ok := rawVolume.(map[string]any)
+			if !ok {
 				continue
 			}
-			if strings.TrimSpace(volume.Source) == "" {
+			typeValue, _ := volume["type"].(string)
+			if strings.ToLower(typeValue) != "bind" {
 				continue
 			}
-			remoteSource, err := remoteBindSource(volume.Source, absAppPath, remoteRoot)
+			source, _ := volume["source"].(string)
+			if strings.TrimSpace(source) == "" {
+				continue
+			}
+			remoteSource, err := remoteBindSource(source, absAppPath, remoteRoot)
 			if err != nil {
-				return fmt.Errorf("service %s bind mount %q: %w", serviceName, volume.Source, err)
+				return nil, fmt.Errorf("service %s bind mount %q: %w", serviceName, source, err)
 			}
-			service.Volumes[idx].Source = remoteSource
+			volume["source"] = remoteSource
 		}
-		project.Services[serviceName] = service
 	}
-	return nil
+
+	return json.Marshal(config)
 }
 
 func remoteBindSource(source, absAppPath, remoteRoot string) (string, error) {
@@ -194,7 +182,7 @@ func remoteBindSource(source, absAppPath, remoteRoot string) (string, error) {
 	return path.Join(remoteRoot, filepath.ToSlash(rel)), nil
 }
 
-func (i *Instance) runComposeOnRemoteContext(project *composetypes.Project) error {
+func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 	keyFile, certFile, err := i.writeTempKeys()
 	if err != nil {
 		return err
@@ -206,231 +194,139 @@ func (i *Instance) runComposeOnRemoteContext(project *composetypes.Project) erro
 		}
 	}()
 
-	registryCredentials := ParseRegistryCredentials(i.Registries, i.Logger)
-	dockerConfigDir, cleanupDockerConfig, err := writeDockerConfigDir(registryCredentials)
+	hostAlias := fmt.Sprintf("pullpreview-%s", i.Name)
+	restoreSSHConfig, err := injectSSHHostAlias(hostAlias, i.PublicIP(), i.Username(), keyFile, certFile)
 	if err != nil {
 		return err
 	}
-	defer cleanupDockerConfig()
+	defer restoreSSHConfig()
 
-	service, cleanupService, err := i.newComposeService(keyFile, certFile, dockerConfigDir)
-	if err != nil {
+	contextName := fmt.Sprintf("pullpreview-%s-%d", i.Name, time.Now().UnixNano())
+	env := os.Environ()
+
+	createContext := exec.Command("docker", "context", "create", contextName, "--docker", "host=ssh://"+hostAlias)
+	createContext.Env = env
+	createContext.Stdout = os.Stdout
+	createContext.Stderr = os.Stderr
+	if err := createContext.Run(); err != nil {
+		return fmt.Errorf("unable to create docker context: %w", err)
+	}
+	defer func() {
+		removeCmd := exec.Command("docker", "context", "rm", "-f", contextName)
+		removeCmd.Env = env
+		removeCmd.Stdout = os.Stdout
+		removeCmd.Stderr = os.Stderr
+		_ = removeCmd.Run()
+	}()
+
+	credentials := ParseRegistryCredentials(i.Registries, i.Logger)
+	if err := loginRegistriesOnRunner(credentials, env); err != nil {
 		return err
 	}
-	defer cleanupService()
-
-	runtimeOptions := parseComposeRuntimeOptions(i.ComposeOptions, i.Logger)
 
 	pullErr := error(nil)
 	for attempt := 1; attempt <= 5; attempt++ {
-		pullErr = service.Pull(context.Background(), project, composeapi.PullOptions{Quiet: runtimeOptions.QuietPull})
+		pullErr = i.runComposeCommandWithConfig(env, contextName, composeConfig, "pull", "-q")
 		if pullErr == nil {
 			break
 		}
-		if i.Logger != nil {
-			i.Logger.Warnf("compose pull failed attempt=%d err=%v", attempt, pullErr)
-		}
-		time.Sleep(2 * time.Second)
 	}
 	if pullErr != nil {
-		return fmt.Errorf("docker compose pull failed: %w", pullErr)
+		return pullErr
 	}
 
-	create := composeapi.CreateOptions{
-		Build:                runtimeOptions.Build,
-		RemoveOrphans:        true,
-		Recreate:             runtimeOptions.Recreate,
-		RecreateDependencies: runtimeOptions.RecreateDependencies,
-		Inherit:              runtimeOptions.InheritVolumes,
-		QuietPull:            runtimeOptions.QuietPull,
-	}
-	start := composeapi.StartOptions{
-		Project:     project,
-		Wait:        true,
-		WaitTimeout: runtimeOptions.WaitTimeout,
-	}
-	if err := service.Up(context.Background(), project, composeapi.UpOptions{Create: create, Start: start}); err != nil {
-		return fmt.Errorf("docker compose up failed: %w", err)
+	upArgs := []string{"up", "--wait", "--remove-orphans", "-d"}
+	upArgs = append(upArgs, i.ComposeOptions...)
+	if err := i.runComposeCommandWithConfig(env, contextName, composeConfig, upArgs...); err != nil {
+		return err
 	}
 
-	if err := service.Logs(context.Background(), project.Name, stdLogConsumer{}, composeapi.LogOptions{
-		Project: project,
-		Tail:    "1000",
-	}); err != nil {
-		return fmt.Errorf("docker compose logs failed: %w", err)
+	if err := i.runComposeCommandWithConfig(env, contextName, composeConfig, "logs", "--tail", "1000"); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (i *Instance) newComposeService(keyFile, certFile, dockerConfigDir string) (composeapi.Service, func(), error) {
-	daemonURL := "ssh://" + i.SSHAddress()
-	sshFlags := []string{
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "LogLevel=ERROR",
-		"-o", "ConnectTimeout=10",
-		"-i", keyFile,
+func loginRegistriesOnRunner(credentials []RegistryCredential, env []string) error {
+	for _, cred := range credentials {
+		cmd := exec.Command("docker", "login", cred.Host, "-u", cred.Username, "--password-stdin")
+		cmd.Env = env
+		cmd.Stdin = strings.NewReader(cred.Password + "\n")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("docker login %s failed: %w", cred.Host, err)
+		}
+	}
+	return nil
+}
+
+func injectSSHHostAlias(hostAlias, hostName, userName, keyFile, certFile string) (func(), error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	sshDir := filepath.Join(homeDir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return nil, err
+	}
+	configPath := filepath.Join(sshDir, "config")
+	originalContent, readErr := os.ReadFile(configPath)
+	fileExisted := readErr == nil
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return nil, readErr
+	}
+
+	lines := []string{
+		fmt.Sprintf("Host %s", hostAlias),
+		fmt.Sprintf("  HostName %s", hostName),
+		fmt.Sprintf("  User %s", userName),
+		fmt.Sprintf("  IdentityFile %s", keyFile),
+		"  IdentitiesOnly yes",
+		"  ServerAliveInterval 15",
+		"  StrictHostKeyChecking no",
+		"  UserKnownHostsFile /dev/null",
+		"  LogLevel ERROR",
+		"  ConnectTimeout 10",
 	}
 	if strings.TrimSpace(certFile) != "" {
-		sshFlags = append(sshFlags, "-o", "CertificateFile="+certFile)
-	}
-	helper, err := connhelper.GetConnectionHelperWithSSHOpts(daemonURL, sshFlags)
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to initialize ssh docker transport: %w", err)
+		lines = append(lines, fmt.Sprintf("  CertificateFile %s", certFile))
 	}
 
-	apiClient, err := dockerclient.NewClientWithOpts(
-		dockerclient.WithHost(helper.Host),
-		dockerclient.WithDialContext(helper.Dialer),
-		dockerclient.WithAPIVersionNegotiation(),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to initialize docker api client: %w", err)
+	newContent := append([]byte{}, originalContent...)
+	if len(newContent) > 0 && !bytes.HasSuffix(newContent, []byte("\n")) {
+		newContent = append(newContent, '\n')
 	}
-
-	dockerCli, err := dockercommand.NewDockerCli(
-		dockercommand.WithInputStream(os.Stdin),
-		dockercommand.WithOutputStream(os.Stdout),
-		dockercommand.WithErrorStream(os.Stderr),
-	)
-	if err != nil {
-		_ = apiClient.Close()
-		return nil, nil, fmt.Errorf("unable to initialize docker cli: %w", err)
-	}
-
-	clientOptions := dockerflags.NewClientOptions()
-	clientOptions.ConfigDir = dockerConfigDir
-	if err := dockerCli.Initialize(clientOptions, dockercommand.WithAPIClient(apiClient)); err != nil {
-		_ = apiClient.Close()
-		return nil, nil, fmt.Errorf("unable to initialize docker cli client: %w", err)
+	newContent = append(newContent, []byte(strings.Join(lines, "\n")+"\n")...)
+	if err := os.WriteFile(configPath, newContent, 0600); err != nil {
+		return nil, err
 	}
 
 	cleanup := func() {
-		_ = apiClient.Close()
-	}
-	return composeservice.NewComposeService(dockerCli), cleanup, nil
-}
-
-func writeDockerConfigDir(credentials []RegistryCredential) (string, func(), error) {
-	dir, err := os.MkdirTemp("", "pullpreview-docker-config-*")
-	if err != nil {
-		return "", nil, err
-	}
-
-	config := dockerconfig.New(filepath.Join(dir, "config.json"))
-	config.AuthConfigs = map[string]dockercfgtypes.AuthConfig{}
-	for _, cred := range credentials {
-		auth := base64.StdEncoding.EncodeToString([]byte(cred.Username + ":" + cred.Password))
-		config.AuthConfigs[cred.Host] = dockercfgtypes.AuthConfig{
-			Username:      cred.Username,
-			Password:      cred.Password,
-			Auth:          auth,
-			ServerAddress: cred.Host,
+		if fileExisted {
+			_ = os.WriteFile(configPath, originalContent, 0600)
+			return
 		}
+		_ = os.Remove(configPath)
 	}
-	if err := config.Save(); err != nil {
-		_ = os.RemoveAll(dir)
-		return "", nil, err
-	}
-
-	cleanup := func() {
-		_ = os.RemoveAll(dir)
-	}
-	return dir, cleanup, nil
+	return cleanup, nil
 }
 
-type composeRuntimeOptions struct {
-	Build                *composeapi.BuildOptions
-	Recreate             string
-	RecreateDependencies string
-	InheritVolumes       bool
-	QuietPull            bool
-	WaitTimeout          time.Duration
-}
-
-func parseComposeRuntimeOptions(composeOptions []string, logger *Logger) composeRuntimeOptions {
-	options := composeRuntimeOptions{
-		Build:                nil,
-		Recreate:             composeapi.RecreateDiverged,
-		RecreateDependencies: composeapi.RecreateDiverged,
-		InheritVolumes:       true,
-		QuietPull:            true,
-		WaitTimeout:          10 * time.Minute,
+func (i *Instance) runComposeCommandWithConfig(env []string, contextName string, composeConfig []byte, args ...string) error {
+	cmdArgs := []string{
+		"--context", contextName,
+		"compose",
+		"--project-name", dockerProjectName,
+		"-f", "-",
 	}
-
-	for idx := 0; idx < len(composeOptions); idx++ {
-		value := strings.TrimSpace(composeOptions[idx])
-		if value == "" {
-			continue
-		}
-		switch {
-		case value == "--build":
-			options.Build = &composeapi.BuildOptions{}
-		case value == "--no-build":
-			options.Build = nil
-		case value == "--force-recreate":
-			options.Recreate = composeapi.RecreateForce
-		case value == "--no-recreate":
-			options.Recreate = composeapi.RecreateNever
-			options.RecreateDependencies = composeapi.RecreateNever
-		case value == "--always-recreate-deps":
-			options.RecreateDependencies = composeapi.RecreateForce
-		case value == "--renew-anon-volumes" || value == "-V":
-			options.InheritVolumes = false
-		case value == "--quiet-pull":
-			options.QuietPull = true
-		case value == "--remove-orphans" || value == "--wait" || value == "--detach" || value == "-d":
-			// Always set by the action.
-		case strings.HasPrefix(value, "--wait-timeout="):
-			raw := strings.TrimPrefix(value, "--wait-timeout=")
-			timeout, err := strconv.Atoi(raw)
-			if err == nil && timeout > 0 {
-				options.WaitTimeout = time.Duration(timeout) * time.Second
-			}
-		case value == "--wait-timeout":
-			if idx+1 >= len(composeOptions) {
-				continue
-			}
-			next := strings.TrimSpace(composeOptions[idx+1])
-			idx++
-			timeout, err := strconv.Atoi(next)
-			if err == nil && timeout > 0 {
-				options.WaitTimeout = time.Duration(timeout) * time.Second
-			}
-		default:
-			if logger != nil {
-				logger.Warnf("Ignoring unsupported compose option in context mode: %s", value)
-			}
-		}
+	cmdArgs = append(cmdArgs, args...)
+	cmd := exec.Command("docker", cmdArgs...)
+	cmd.Env = env
+	cmd.Stdin = bytes.NewReader(composeConfig)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker compose %s failed: %w", strings.Join(args, " "), err)
 	}
-
-	return options
-}
-
-type stdLogConsumer struct{}
-
-func (stdLogConsumer) Register(container string) {}
-
-func (stdLogConsumer) Log(containerName, message string) {
-	printComposeLog(containerName, message)
-}
-
-func (stdLogConsumer) Err(containerName, message string) {
-	printComposeLog(containerName, message)
-}
-
-func (stdLogConsumer) Status(containerName, message string) {
-	printComposeLog(containerName, message)
-}
-
-func printComposeLog(containerName, message string) {
-	text := strings.TrimSpace(message)
-	if text == "" {
-		return
-	}
-	if strings.TrimSpace(containerName) == "" {
-		fmt.Println(text)
-		return
-	}
-	fmt.Printf("%s | %s\n", containerName, text)
+	return nil
 }
