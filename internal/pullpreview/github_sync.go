@@ -290,7 +290,7 @@ func destroyEnvironment(repo, environment string, client GitHubAPI, logger *Logg
 	}
 	if err := client.DeleteEnvironment(repo, environment); err != nil {
 		if logger != nil {
-			logger.Warnf("Unable to destroy environment %s: %v. You may need to delete it manually.", environment, err)
+			logger.Warnf("Unable to destroy environment %s: %v. This usually means the token lacks environment admin permission. Provide a stronger github_token input or delete it manually.", environment, err)
 		}
 	}
 }
@@ -543,6 +543,10 @@ func (g *GithubSync) renderPRComment(status deploymentStatus, previewURL string)
 		statusText = "✅ Deploy successful"
 	case statusError:
 		statusText = "❌ Deploy failed"
+	case statusDestroying:
+		statusText = "🧹 Destroying preview..."
+	case statusDestroyed:
+		statusText = "🗑️ Preview destroyed"
 	default:
 		return ""
 	}
@@ -551,6 +555,12 @@ func (g *GithubSync) renderPRComment(status deploymentStatus, previewURL string)
 		commit = commit[:7]
 	}
 	preview := "_Pending_"
+	if status == statusDestroying {
+		preview = "_Destroying_"
+	}
+	if status == statusDestroyed {
+		preview = "_Destroyed_"
+	}
 	if strings.TrimSpace(previewURL) != "" {
 		preview = fmt.Sprintf("[%s](%s)", previewURL, previewURL)
 	}
