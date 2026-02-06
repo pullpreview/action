@@ -522,7 +522,8 @@ func (g *GithubSync) updatePRComment(status deploymentStatus, previewURL string)
 	}
 	marker := g.prCommentMarker()
 	for _, comment := range comments {
-		if strings.Contains(comment.GetBody(), marker) {
+		commentBody := comment.GetBody()
+		if strings.Contains(commentBody, marker) {
 			if err := g.client.UpdateIssueComment(g.repo(), comment.GetID(), body); err != nil && g.logger != nil {
 				g.logger.Warnf("Unable to update PR comment for PR#%d: %v", g.prNumber(), err)
 			}
@@ -535,7 +536,27 @@ func (g *GithubSync) updatePRComment(status deploymentStatus, previewURL string)
 }
 
 func (g *GithubSync) prCommentMarker() string {
-	return fmt.Sprintf("<!-- pullpreview-status:%s -->", g.instanceName())
+	key := g.instanceName()
+	if job := g.jobKey(); job != "" {
+		key = fmt.Sprintf("%s:%s", key, job)
+	}
+	return fmt.Sprintf("<!-- pullpreview-status:%s -->", key)
+}
+
+func (g *GithubSync) jobName() string {
+	return strings.TrimSpace(os.Getenv("GITHUB_JOB"))
+}
+
+func (g *GithubSync) jobKey() string {
+	job := g.jobName()
+	if job == "" {
+		return ""
+	}
+	key := NormalizeName(job)
+	if key == "" {
+		return "job"
+	}
+	return key
 }
 
 func (g *GithubSync) renderPRComment(status deploymentStatus, previewURL string) string {
@@ -573,12 +594,22 @@ func (g *GithubSync) renderPRComment(status deploymentStatus, previewURL string)
 	if logs != "" {
 		logsLine = fmt.Sprintf("\n[View logs](%s)\n", logs)
 	}
+	variantRow := ""
+	if variant := g.deploymentVariant(); variant != "" {
+		variantRow = fmt.Sprintf("| Variant | `%s` |\n", variant)
+	}
+	jobRow := ""
+	if job := g.jobName(); job != "" {
+		jobRow = fmt.Sprintf("| Job | `%s` |\n", job)
+	}
 	title := fmt.Sprintf("### Deploying %s with [⚡](https://pullpreview.com) PullPreview", g.repoName())
 	return fmt.Sprintf(
-		"%s\n%s\n\n| Field | Value |\n|---|---|\n| Latest commit | `%s` |\n| Status | %s |\n| Preview URL | %s |\n%s",
+		"%s\n%s\n\n| Field | Value |\n|---|---|\n| Latest commit | `%s` |\n%s%s| Status | %s |\n| Preview URL | %s |\n%s",
 		g.prCommentMarker(),
 		title,
 		commit,
+		variantRow,
+		jobRow,
 		statusText,
 		preview,
 		logsLine,
