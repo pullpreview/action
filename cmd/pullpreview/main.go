@@ -186,6 +186,7 @@ func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 	fs.StringVar(&values.admins, "admins", "", "Logins of GitHub users that will have their SSH key installed on the instance")
 	fs.StringVar(&values.cidrs, "cidrs", "0.0.0.0/0", "CIDRs allowed to connect to the instance")
 	fs.StringVar(&values.registries, "registries", "", "URIs of docker registries to authenticate against")
+	fs.StringVar(&values.options.ProxyTLS, "proxy-tls", "", "Enable automatic HTTPS proxying with Let's Encrypt (format: service:port, e.g. web:80)")
 	fs.StringVar(&values.options.DNS, "dns", "my.preview.run", "DNS suffix to use")
 	fs.StringVar(&values.ports, "ports", "80/tcp,443/tcp", "Ports to open for external access")
 	fs.StringVar(&values.options.InstanceType, "instance-type", "small", "Instance type to use")

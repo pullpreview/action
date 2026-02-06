@@ -68,6 +68,10 @@ inputs:
     description: "Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io"
     required: false
     default: ""
+  proxy_tls:
+    description: "Enable automatic HTTPS forwarding with Let's Encrypt (format: service:port, e.g. web:80)"
+    required: false
+    default: ""
   pre_script:
     description: "Path to a bash script to run on the instance, before calling docker compose, relative to the app_path"
     required: false
@@ -141,6 +145,7 @@ runs:
           --instance-type "${{ inputs.instance_type }}" \
           --deployment-variant "${{ inputs.deployment_variant }}" \
           --registries "${{ inputs.registries }}" \
+          --proxy-tls "${{ inputs.proxy_tls }}" \
           --pre-script "${{ inputs.pre_script }}" \
           --ttl "${{ inputs.ttl }}" \
           --comment-pr "${{ inputs.comment_pr }}"

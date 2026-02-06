@@ -113,7 +113,7 @@ func (i *Instance) composeConfigForRemoteContext(appPath string) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-	return rewritten, nil
+	return applyProxyTLS(rewritten, i.ProxyTLS, i.PublicDNS(), i.Logger)
 }
 
 func rewriteRelativeBindSources(composeConfigJSON []byte, absAppPath, remoteRoot string) ([]byte, error) {
