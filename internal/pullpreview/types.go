@@ -1,6 +1,9 @@
 package pullpreview
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type Provider interface {
 	Launch(name string, opts LaunchOptions) (AccessDetails, error)
@@ -36,18 +39,20 @@ type InstanceSummary struct {
 }
 
 type CommonOptions struct {
-	Admins         []string
-	CIDRs          []string
-	Registries     []string
-	ProxyTLS       string
-	DNS            string
-	Ports          []string
-	InstanceType   string
-	DefaultPort    string
-	Tags           map[string]string
-	ComposeFiles   []string
-	ComposeOptions []string
-	PreScript      string
+	Admins          []string
+	AdminPublicKeys []string
+	Context         context.Context
+	CIDRs           []string
+	Registries      []string
+	ProxyTLS        string
+	DNS             string
+	Ports           []string
+	InstanceType    string
+	DefaultPort     string
+	Tags            map[string]string
+	ComposeFiles    []string
+	ComposeOptions  []string
+	PreScript       string
 }
 
 type UpOptions struct {
@@ -73,5 +78,6 @@ type GithubSyncOptions struct {
 	DeploymentVariant string
 	TTL               string
 	CommentPR         bool
+	Context           context.Context
 	Common            CommonOptions
 }

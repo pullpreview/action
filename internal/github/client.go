@@ -10,16 +10,23 @@ import (
 
 type Client struct {
 	api *gh.Client
+	ctx context.Context
 }
 
 func New(token string) *Client {
-	ctx := context.Background()
+	return NewWithContext(context.Background(), token)
+}
+
+func NewWithContext(ctx context.Context, token string) *Client {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if token == "" {
-		return &Client{api: gh.NewClient(nil)}
+		return &Client{api: gh.NewClient(nil), ctx: ctx}
 	}
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	client := oauth2.NewClient(ctx, ts)
-	return &Client{api: gh.NewClient(client)}
+	return &Client{api: gh.NewClient(client), ctx: ctx}
 }
 
 func splitRepo(repo string) (string, string) {
@@ -33,19 +40,19 @@ func splitRepo(repo string) (string, string) {
 func (c *Client) ListIssues(repo, label string) ([]*gh.Issue, error) {
 	owner, name := splitRepo(repo)
 	opts := &gh.IssueListByRepoOptions{State: "all", Labels: []string{label}, ListOptions: gh.ListOptions{PerPage: 100}}
-	issues, _, err := c.api.Issues.ListByRepo(context.Background(), owner, name, opts)
+	issues, _, err := c.api.Issues.ListByRepo(c.ctx, owner, name, opts)
 	return issues, err
 }
 
 func (c *Client) GetPullRequest(repo string, number int) (*gh.PullRequest, error) {
 	owner, name := splitRepo(repo)
-	pr, _, err := c.api.PullRequests.Get(context.Background(), owner, name, number)
+	pr, _, err := c.api.PullRequests.Get(c.ctx, owner, name, number)
 	return pr, err
 }
 
 func (c *Client) ListEnvironments(repo string) ([]*gh.Environment, error) {
 	owner, name := splitRepo(repo)
-	envs, _, err := c.api.Repositories.ListEnvironments(context.Background(), owner, name, &gh.EnvironmentListOptions{
+	envs, _, err := c.api.Repositories.ListEnvironments(c.ctx, owner, name, &gh.EnvironmentListOptions{
 		ListOptions: gh.ListOptions{PerPage: 100},
 	})
 	if err != nil {
@@ -60,7 +67,7 @@ func (c *Client) ListDeployments(repo, environment, ref string) ([]*gh.Deploymen
 	if ref != "" {
 		opts.Ref = ref
 	}
-	deploys, _, err := c.api.Repositories.ListDeployments(context.Background(), owner, name, opts)
+	deploys, _, err := c.api.Repositories.ListDeployments(c.ctx, owner, name, opts)
 	return deploys, err
 }
 
@@ -73,7 +80,7 @@ func (c *Client) CreateDeployment(repo, ref, environment string) (*gh.Deployment
 		Environment:      gh.String(environment),
 		RequiredContexts: &requiredContexts,
 	}
-	deployment, _, err := c.api.Repositories.CreateDeployment(context.Background(), owner, name, req)
+	deployment, _, err := c.api.Repositories.CreateDeployment(c.ctx, owner, name, req)
 	return deployment, err
 }
 
@@ -83,7 +90,7 @@ func (c *Client) CreateDeploymentStatus(repo string, deploymentID int64, state s
 	if environmentURL != "" {
 		request.EnvironmentURL = gh.String(environmentURL)
 	}
-	_, _, err := c.api.Repositories.CreateDeploymentStatus(context.Background(), owner, name, deploymentID, request)
+	_, _, err := c.api.Repositories.CreateDeploymentStatus(c.ctx, owner, name, deploymentID, request)
 	return err
 }
 
@@ -93,31 +100,31 @@ func (c *Client) CreateCommitStatus(repo, sha, state, targetURL, statusContext, 
 	if targetURL != "" {
 		status.TargetURL = gh.String(targetURL)
 	}
-	_, _, err := c.api.Repositories.CreateStatus(context.Background(), owner, name, sha, status)
+	_, _, err := c.api.Repositories.CreateStatus(c.ctx, owner, name, sha, status)
 	return err
 }
 
 func (c *Client) DeleteDeployment(repo string, deploymentID int64) error {
 	owner, name := splitRepo(repo)
-	_, err := c.api.Repositories.DeleteDeployment(context.Background(), owner, name, deploymentID)
+	_, err := c.api.Repositories.DeleteDeployment(c.ctx, owner, name, deploymentID)
 	return err
 }
 
 func (c *Client) DeleteEnvironment(repo, name string) error {
 	owner, repoName := splitRepo(repo)
-	_, err := c.api.Repositories.DeleteEnvironment(context.Background(), owner, repoName, name)
+	_, err := c.api.Repositories.DeleteEnvironment(c.ctx, owner, repoName, name)
 	return err
 }
 
 func (c *Client) RemoveLabel(repo string, number int, label string) error {
 	owner, name := splitRepo(repo)
-	_, err := c.api.Issues.RemoveLabelForIssue(context.Background(), owner, name, number, label)
+	_, err := c.api.Issues.RemoveLabelForIssue(c.ctx, owner, name, number, label)
 	return err
 }
 
 func (c *Client) ListIssueComments(repo string, number int) ([]*gh.IssueComment, error) {
 	owner, name := splitRepo(repo)
-	comments, _, err := c.api.Issues.ListComments(context.Background(), owner, name, number, &gh.IssueListCommentsOptions{
+	comments, _, err := c.api.Issues.ListComments(c.ctx, owner, name, number, &gh.IssueListCommentsOptions{
 		ListOptions: gh.ListOptions{PerPage: 100},
 	})
 	return comments, err
@@ -125,7 +132,7 @@ func (c *Client) ListIssueComments(repo string, number int) ([]*gh.IssueComment,
 
 func (c *Client) CreateIssueComment(repo string, number int, body string) error {
 	owner, name := splitRepo(repo)
-	_, _, err := c.api.Issues.CreateComment(context.Background(), owner, name, number, &gh.IssueComment{
+	_, _, err := c.api.Issues.CreateComment(c.ctx, owner, name, number, &gh.IssueComment{
 		Body: gh.String(body),
 	})
 	return err
@@ -133,7 +140,7 @@ func (c *Client) CreateIssueComment(repo string, number int, body string) error 
 
 func (c *Client) UpdateIssueComment(repo string, commentID int64, body string) error {
 	owner, name := splitRepo(repo)
-	_, _, err := c.api.Issues.EditComment(context.Background(), owner, name, commentID, &gh.IssueComment{
+	_, _, err := c.api.Issues.EditComment(c.ctx, owner, name, commentID, &gh.IssueComment{
 		Body: gh.String(body),
 	})
 	return err
@@ -142,22 +149,45 @@ func (c *Client) UpdateIssueComment(repo string, commentID int64, body string) e
 func (c *Client) ListPullRequests(repo, head string) ([]*gh.PullRequest, error) {
 	owner, name := splitRepo(repo)
 	opts := &gh.PullRequestListOptions{State: "open", Head: head, ListOptions: gh.ListOptions{PerPage: 100}}
-	prs, _, err := c.api.PullRequests.List(context.Background(), owner, name, opts)
+	prs, _, err := c.api.PullRequests.List(c.ctx, owner, name, opts)
 	return prs, err
 }
 
 func (c *Client) LatestCommitSHA(repo, ref string) (string, error) {
 	owner, name := splitRepo(repo)
 	opts := &gh.CommitsListOptions{SHA: ref, ListOptions: gh.ListOptions{PerPage: 1}}
-	commits, _, err := c.api.Repositories.ListCommits(context.Background(), owner, name, opts)
+	commits, _, err := c.api.Repositories.ListCommits(c.ctx, owner, name, opts)
 	if err != nil || len(commits) == 0 {
 		return "", err
 	}
 	return commits[0].GetSHA(), nil
 }
 
-func (c *Client) ListCollaborators(repo string) ([]*gh.User, error) {
+func (c *Client) ListCollaborators(repo string) ([]*gh.User, bool, error) {
 	owner, name := splitRepo(repo)
-	users, _, err := c.api.Repositories.ListCollaborators(context.Background(), owner, name, nil)
-	return users, err
+	opts := &gh.ListCollaboratorsOptions{
+		Affiliation: "all",
+		Permission:  "push",
+		ListOptions: gh.ListOptions{PerPage: 100},
+	}
+	users, resp, err := c.api.Repositories.ListCollaborators(c.ctx, owner, name, opts)
+	if err != nil {
+		return nil, false, err
+	}
+	return users, resp != nil && resp.NextPage != 0, nil
+}
+
+func (c *Client) ListUserPublicKeys(user string) ([]string, error) {
+	keys, _, err := c.api.Users.ListKeys(c.ctx, user, &gh.ListOptions{PerPage: 100})
+	if err != nil {
+		return nil, err
+	}
+	result := []string{}
+	for _, key := range keys {
+		value := strings.TrimSpace(key.GetKey())
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result, nil
 }

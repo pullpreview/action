@@ -1,6 +1,7 @@
 package pullpreview
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ type fakeGitHub struct {
 	comments            []*gh.IssueComment
 	createdComments     []string
 	updatedComments     []string
+	userPublicKeys      map[string][]string
 }
 
 func (f *fakeGitHub) ListIssues(repo, label string) ([]*gh.Issue, error) {
@@ -114,8 +116,15 @@ func (f *fakeGitHub) LatestCommitSHA(repo, ref string) (string, error) {
 	return f.latestSHA, nil
 }
 
-func (f *fakeGitHub) ListCollaborators(repo string) ([]*gh.User, error) {
-	return f.collaborators, nil
+func (f *fakeGitHub) ListCollaborators(repo string) ([]*gh.User, bool, error) {
+	return f.collaborators, false, nil
+}
+
+func (f *fakeGitHub) ListUserPublicKeys(user string) ([]string, error) {
+	if f.userPublicKeys == nil {
+		return nil, nil
+	}
+	return f.userPublicKeys[user], nil
 }
 
 type fakeProvider struct {
@@ -315,18 +324,22 @@ func TestExpandedAdminsIncludesCollaboratorsWithPush(t *testing.T) {
 		collaborators: []*gh.User{
 			{Login: gh.String("alice"), Permissions: map[string]bool{"push": true}},
 			{Login: gh.String("bob"), Permissions: map[string]bool{"push": false}},
+			{Login: gh.String("team-user")},
 		},
 	}
 	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{Admins: []string{"@collaborators/push", "manual"}}}, client, fakeProvider{running: true})
 	admins := sync.expandedAdmins()
-	if len(admins) != 2 {
-		t.Fatalf("expected 2 admins, got %v", admins)
+	if len(admins) != 3 {
+		t.Fatalf("expected 3 admins, got %v", admins)
 	}
-	if admins[0] != "manual" && admins[1] != "manual" {
+	if admins[0] != "manual" && admins[1] != "manual" && admins[2] != "manual" {
 		t.Fatalf("expected manual admin to be preserved, got %v", admins)
 	}
-	if admins[0] != "alice" && admins[1] != "alice" {
+	if admins[0] != "alice" && admins[1] != "alice" && admins[2] != "alice" {
 		t.Fatalf("expected push collaborator to be included, got %v", admins)
+	}
+	if admins[0] != "team-user" && admins[1] != "team-user" && admins[2] != "team-user" {
+		t.Fatalf("expected team-derived collaborator to be included, got %v", admins)
 	}
 }
 
@@ -380,7 +393,7 @@ func TestRunGithubSyncFromEnvironmentRunsUpForLabeledPR(t *testing.T) {
 		runUpFunc = originalRunUp
 		runDownFunc = originalRunDown
 	}()
-	newGitHubClient = func(token string) GitHubAPI { return client }
+	newGitHubClient = func(ctx context.Context, token string) GitHubAPI { return client }
 	upCalled := false
 	runUpFunc = func(opts UpOptions, provider Provider, logger *Logger) (*Instance, error) {
 		upCalled = true
@@ -429,7 +442,7 @@ func TestRunGithubSyncFromEnvironmentRunsDownForBranchPushWithoutAlwaysOn(t *tes
 		runUpFunc = originalRunUp
 		runDownFunc = originalRunDown
 	}()
-	newGitHubClient = func(token string) GitHubAPI { return client }
+	newGitHubClient = func(ctx context.Context, token string) GitHubAPI { return client }
 	runUpFunc = func(opts UpOptions, provider Provider, logger *Logger) (*Instance, error) {
 		t.Fatalf("runUp should not be called for branch down action")
 		return nil, nil

@@ -2,6 +2,7 @@ package pullpreview
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -28,24 +29,26 @@ func (r SystemRunner) Run(cmd *exec.Cmd) error {
 }
 
 type Instance struct {
-	Name           string
-	Subdomain      string
-	Admins         []string
-	CIDRs          []string
-	ComposeFiles   []string
-	ComposeOptions []string
-	DefaultPort    string
-	DNS            string
-	Ports          []string
-	ProxyTLS       string
-	Provider       Provider
-	Registries     []string
-	Size           string
-	Tags           map[string]string
-	PreScript      string
-	Access         AccessDetails
-	Logger         *Logger
-	Runner         Runner
+	Name            string
+	Subdomain       string
+	Admins          []string
+	AdminPublicKeys []string
+	Context         context.Context
+	CIDRs           []string
+	ComposeFiles    []string
+	ComposeOptions  []string
+	DefaultPort     string
+	DNS             string
+	Ports           []string
+	ProxyTLS        string
+	Provider        Provider
+	Registries      []string
+	Size            string
+	Tags            map[string]string
+	PreScript       string
+	Access          AccessDetails
+	Logger          *Logger
+	Runner          Runner
 }
 
 func NewInstance(name string, opts CommonOptions, provider Provider, logger *Logger) *Instance {
@@ -59,23 +62,25 @@ func NewInstance(name string, opts CommonOptions, provider Provider, logger *Log
 		defaultPort = "443"
 	}
 	return &Instance{
-		Name:           normalized,
-		Subdomain:      NormalizeName(name),
-		Admins:         opts.Admins,
-		CIDRs:          defaultSlice(opts.CIDRs, []string{"0.0.0.0/0"}),
-		ComposeFiles:   defaultSlice(opts.ComposeFiles, []string{"docker-compose.yml"}),
-		ComposeOptions: defaultSlice(opts.ComposeOptions, []string{"--build"}),
-		DefaultPort:    defaultPort,
-		DNS:            defaultString(opts.DNS, "my.preview.run"),
-		Ports:          opts.Ports,
-		ProxyTLS:       proxyTLS,
-		Provider:       provider,
-		Registries:     opts.Registries,
-		Size:           opts.InstanceType,
-		Tags:           defaultMap(opts.Tags),
-		PreScript:      opts.PreScript,
-		Logger:         logger,
-		Runner:         SystemRunner{},
+		Name:            normalized,
+		Subdomain:       NormalizeName(name),
+		Admins:          opts.Admins,
+		AdminPublicKeys: opts.AdminPublicKeys,
+		Context:         ensureContext(opts.Context),
+		CIDRs:           defaultSlice(opts.CIDRs, []string{"0.0.0.0/0"}),
+		ComposeFiles:    defaultSlice(opts.ComposeFiles, []string{"docker-compose.yml"}),
+		ComposeOptions:  defaultSlice(opts.ComposeOptions, []string{"--build"}),
+		DefaultPort:     defaultPort,
+		DNS:             defaultString(opts.DNS, "my.preview.run"),
+		Ports:           opts.Ports,
+		ProxyTLS:        proxyTLS,
+		Provider:        provider,
+		Registries:      opts.Registries,
+		Size:            opts.InstanceType,
+		Tags:            defaultMap(opts.Tags),
+		PreScript:       opts.PreScript,
+		Logger:          logger,
+		Runner:          SystemRunner{},
 	}
 }
 
@@ -123,7 +128,7 @@ func (i *Instance) LaunchAndWait() error {
 	if i.Logger != nil {
 		i.Logger.Infof("Instance is running public_ip=%s", i.PublicIP())
 	}
-	if ok := WaitUntil(30, 5*time.Second, func() bool {
+	if ok := WaitUntilContext(i.Context, 30, 5*time.Second, func() bool {
 		if i.Logger != nil {
 			i.Logger.Infof(
 				"Waiting for SSH username=%s ip=%s ssh=\"ssh %s\"",
@@ -229,6 +234,10 @@ func uniqueStrings(values []string) []string {
 }
 
 func (i *Instance) SSHPublicKeys() []string {
+	if len(i.AdminPublicKeys) > 0 {
+		return uniqueStrings(i.AdminPublicKeys)
+	}
+
 	keys := []string{}
 	client := http.Client{Timeout: 10 * time.Second}
 	for _, admin := range i.Admins {
@@ -300,7 +309,7 @@ func (i *Instance) SSH(command string, input io.Reader) error {
 	args = append(args, i.SSHAddress())
 	args = append(args, command)
 
-	cmd := exec.Command("ssh", args...)
+	cmd := exec.CommandContext(i.Context, "ssh", args...)
 	cmd.Stdin = input
 	if input == nil {
 		cmd.Stdin = os.Stdin
@@ -391,7 +400,7 @@ func (i *Instance) CloneIfURL(appPath string) (string, func(), error) {
 			return "", nil, err
 		}
 		cleanup := func() { _ = os.RemoveAll(tmpDir) }
-		cmd := exec.Command("git", "clone", gitURL, "--depth=1", "--branch", ref, tmpDir)
+		cmd := exec.CommandContext(i.Context, "git", "clone", gitURL, "--depth=1", "--branch", ref, tmpDir)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := i.Runner.Run(cmd); err != nil {

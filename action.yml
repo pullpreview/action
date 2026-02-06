@@ -99,6 +99,13 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Restore SSH key cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/pullpreview-ssh-keys
+        key: pullpreview-ssh-keys-v1-${{ github.repository_id }}-${{ github.run_id }}
+        restore-keys: |
+          pullpreview-ssh-keys-v1-${{ github.repository_id }}-
     - id: pullpreview
       shell: bash
       env:
@@ -106,8 +113,10 @@ runs:
         PULLPREVIEW_LICENSE: "${{ inputs.license }}"
         PULLPREVIEW_PROVIDER: "${{ inputs.provider }}"
         PULLPREVIEW_MAX_DOMAIN_LENGTH: "${{ inputs.max_domain_length }}"
+        PULLPREVIEW_SSH_KEYS_CACHE_DIR: "${{ runner.temp }}/pullpreview-ssh-keys"
       run: |
         set -euo pipefail
+        mkdir -p "${PULLPREVIEW_SSH_KEYS_CACHE_DIR}"
 
         os="$(echo "${RUNNER_OS}" | tr '[:upper:]' '[:lower:]')"
         arch="$(echo "${RUNNER_ARCH}" | tr '[:upper:]' '[:lower:]')"

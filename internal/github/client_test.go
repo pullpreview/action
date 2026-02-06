@@ -1,6 +1,8 @@
 package github
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +26,7 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	api.BaseURL = baseURL
 	api.UploadURL = baseURL
 
-	return &Client{api: api}
+	return &Client{api: api, ctx: context.Background()}
 }
 
 func TestNew(t *testing.T) {
@@ -260,7 +262,22 @@ func TestPullRequestsCommitsAndCollaborators(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`[{"sha":"abc123"}]`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/org/repo/collaborators":
+			if got := r.URL.Query().Get("affiliation"); got != "all" {
+				t.Fatalf("unexpected affiliation query: %q", got)
+			}
+			if got := r.URL.Query().Get("permission"); got != "push" {
+				t.Fatalf("unexpected permission query: %q", got)
+			}
+			if got := r.URL.Query().Get("per_page"); got != "100" {
+				t.Fatalf("unexpected per_page query: %q", got)
+			}
+			w.Header().Set("Link", fmt.Sprintf("<http://%s/repos/org/repo/collaborators?page=2>; rel=\"next\"", r.Host))
 			_, _ = w.Write([]byte(`[{"login":"alice"},{"login":"bob"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/users/alice/keys":
+			if got := r.URL.Query().Get("per_page"); got != "100" {
+				t.Fatalf("unexpected per_page query for user keys: %q", got)
+			}
+			_, _ = w.Write([]byte(`[{"key":"ssh-ed25519 AAAA alice@dev"},{"key":"ssh-rsa BBBB alice@dev"}]`))
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -282,12 +299,23 @@ func TestPullRequestsCommitsAndCollaborators(t *testing.T) {
 		t.Fatalf("unexpected sha: %q", sha)
 	}
 
-	users, err := client.ListCollaborators("org/repo")
+	users, truncated, err := client.ListCollaborators("org/repo")
 	if err != nil {
 		t.Fatalf("ListCollaborators() error: %v", err)
 	}
-	if len(users) != 2 || users[0].GetLogin() != "alice" {
+	if len(users) != 2 || users[0].GetLogin() != "alice" || users[1].GetLogin() != "bob" {
 		t.Fatalf("unexpected collaborators: %#v", users)
+	}
+	if !truncated {
+		t.Fatalf("expected collaborators list to be marked as truncated")
+	}
+
+	keys, err := client.ListUserPublicKeys("alice")
+	if err != nil {
+		t.Fatalf("ListUserPublicKeys() error: %v", err)
+	}
+	if len(keys) != 2 || keys[0] != "ssh-ed25519 AAAA alice@dev" || keys[1] != "ssh-rsa BBBB alice@dev" {
+		t.Fatalf("unexpected user keys: %#v", keys)
 	}
 }
 
