@@ -5,7 +5,7 @@ This repository ships a GitHub Action implemented in Go.
 ## Runtime
 - Action definition: `action.yml`
 - Action type: `composite`
-- Runtime binary: prebuilt artifact in `dist/`
+- Runtime binary: prebuilt amd64 Linux artifact in `dist/`
 - No Docker image build is required during action execution.
 
 ## Go Tooling
@@ -14,6 +14,10 @@ This repository ships a GitHub Action implemented in Go.
   - `mise exec -- go test ./...`
   - `mise exec -- go run ./cmd/pullpreview up examples/example-app`
   - `make dist`
+- Dist workflow:
+  - Commit source changes first.
+  - Run `make dist` afterwards.
+  - `make dist` auto-commits the updated bundled binary with a standard commit message.
 
 ## CLI
 Entrypoint source is `cmd/pullpreview/main.go`.
@@ -59,4 +63,4 @@ Supported commands:
 - `internal/providers/lightsail`: Lightsail provider
 - `internal/github`: GitHub API wrapper
 - `internal/license`: license check client
-- `dist/`: bundled Linux binaries used by the action
+- `dist/`: bundled Linux amd64 binary used by the action
