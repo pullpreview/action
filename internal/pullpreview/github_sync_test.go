@@ -12,23 +12,18 @@ import (
 )
 
 type fakeGitHub struct {
-	latestSHA           string
-	commitStatuses      []string
-	commitStatusURLs    []string
-	deploymentStates    []string
-	deployments         []*gh.Deployment
-	pullRequestsByRef   map[string][]*gh.PullRequest
-	pullRequestsByNum   map[int]*gh.PullRequest
-	issues              []*gh.Issue
-	environments        []*gh.Environment
-	collaborators       []*gh.User
-	removedLabels       []string
-	deletedDeployments  []int64
-	deletedEnvironments []string
-	comments            []*gh.IssueComment
-	createdComments     []string
-	updatedComments     []string
-	userPublicKeys      map[string][]string
+	latestSHA         string
+	commitStatuses    []string
+	commitStatusURLs  []string
+	pullRequestsByRef map[string][]*gh.PullRequest
+	pullRequestsByNum map[int]*gh.PullRequest
+	issues            []*gh.Issue
+	collaborators     []*gh.User
+	removedLabels     []string
+	comments          []*gh.IssueComment
+	createdComments   []string
+	updatedComments   []string
+	userPublicKeys    map[string][]string
 }
 
 func (f *fakeGitHub) ListIssues(repo, label string) ([]*gh.Issue, error) {
@@ -42,39 +37,9 @@ func (f *fakeGitHub) GetPullRequest(repo string, number int) (*gh.PullRequest, e
 	return f.pullRequestsByNum[number], nil
 }
 
-func (f *fakeGitHub) ListEnvironments(repo string) ([]*gh.Environment, error) {
-	return f.environments, nil
-}
-
-func (f *fakeGitHub) ListDeployments(repo, environment, ref string) ([]*gh.Deployment, error) {
-	return f.deployments, nil
-}
-
-func (f *fakeGitHub) CreateDeployment(repo, ref, environment string) (*gh.Deployment, error) {
-	id := int64(len(f.deployments) + 1)
-	dep := &gh.Deployment{ID: gh.Int64(id)}
-	f.deployments = []*gh.Deployment{dep}
-	return dep, nil
-}
-
-func (f *fakeGitHub) CreateDeploymentStatus(repo string, deploymentID int64, state string, environmentURL string, autoInactive bool) error {
-	f.deploymentStates = append(f.deploymentStates, state)
-	return nil
-}
-
 func (f *fakeGitHub) CreateCommitStatus(repo, sha, state, targetURL, context, description string) error {
 	f.commitStatuses = append(f.commitStatuses, state)
 	f.commitStatusURLs = append(f.commitStatusURLs, targetURL)
-	return nil
-}
-
-func (f *fakeGitHub) DeleteDeployment(repo string, deploymentID int64) error {
-	f.deletedDeployments = append(f.deletedDeployments, deploymentID)
-	return nil
-}
-
-func (f *fakeGitHub) DeleteEnvironment(repo, name string) error {
-	f.deletedEnvironments = append(f.deletedEnvironments, name)
 	return nil
 }
 
@@ -230,7 +195,7 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	event := loadFixtureEvent(t, "github_event_labeled.json")
 	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
 	upCalled := false
-	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, client, fakeProvider{running: true})
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, client, fakeProvider{running: true})
 	sync.runUp = func(opts UpOptions, provider Provider, logger *Logger) (*Instance, error) {
 		upCalled = true
 		inst := NewInstance(opts.Name, opts.Common, provider, logger)
@@ -271,9 +236,8 @@ func TestSyncLabeledProxyTLSUsesHTTPSURLInStatusAndComment(t *testing.T) {
 	event := loadFixtureEvent(t, "github_event_labeled.json")
 	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
 	sync := newSync(event, GithubSyncOptions{
-		Label:     "pullpreview",
-		CommentPR: true,
-		Common:    CommonOptions{ProxyTLS: "web:80"},
+		Label:  "pullpreview",
+		Common: CommonOptions{ProxyTLS: "web:80"},
 	}, client, fakeProvider{running: true})
 
 	if err := sync.Sync(); err != nil {
@@ -319,7 +283,7 @@ func TestSyncClosedPRRunsDownAndRemovesLabel(t *testing.T) {
 	}
 	client := &fakeGitHub{latestSHA: "abc"}
 	downCalled := false
-	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, client, fakeProvider{running: true})
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, client, fakeProvider{running: true})
 	sync.runDown = func(opts DownOptions, provider Provider, logger *Logger) error {
 		downCalled = true
 		return nil
@@ -384,26 +348,6 @@ func TestValidateDeploymentVariant(t *testing.T) {
 	}
 }
 
-func TestClearOutdatedEnvironmentsRemovesDanglingPREnvironments(t *testing.T) {
-	client := &fakeGitHub{
-		environments: []*gh.Environment{
-			{Name: gh.String("gh-1-pr-10")},
-			{Name: gh.String("gh-1-pr-99")},
-			{Name: gh.String("gh-1-branch-main")},
-		},
-		issues: []*gh.Issue{
-			{Number: gh.Int(10), PullRequestLinks: &gh.PullRequestLinks{}},
-		},
-	}
-	err := clearOutdatedEnvironments("org/repo", GithubSyncOptions{Label: "pullpreview"}, fakeProvider{}, client, nil)
-	if err != nil {
-		t.Fatalf("clearOutdatedEnvironments() error: %v", err)
-	}
-	if len(client.deletedEnvironments) != 1 || client.deletedEnvironments[0] != "gh-1-pr-99" {
-		t.Fatalf("unexpected deleted environments: %v", client.deletedEnvironments)
-	}
-}
-
 func TestRunGithubSyncFromEnvironmentRunsUpForLabeledPR(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	event := loadFixtureEvent(t, "github_event_labeled.json")
@@ -432,7 +376,7 @@ func TestRunGithubSyncFromEnvironmentRunsUpForLabeledPR(t *testing.T) {
 	}
 	runDownFunc = func(opts DownOptions, provider Provider, logger *Logger) error { return nil }
 
-	err := RunGithubSync(GithubSyncOptions{AppPath: "/tmp/app", Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, fakeProvider{running: true}, nil)
+	err := RunGithubSync(GithubSyncOptions{AppPath: "/tmp/app", Label: "pullpreview", Common: CommonOptions{}}, fakeProvider{running: true}, nil)
 	if err != nil {
 		t.Fatalf("RunGithubSync() error: %v", err)
 	}
@@ -443,7 +387,7 @@ func TestRunGithubSyncFromEnvironmentRunsUpForLabeledPR(t *testing.T) {
 
 func TestRenderPRCommentForErrorState(t *testing.T) {
 	event := loadFixtureEvent(t, "github_event_labeled.json")
-	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
 	body := sync.renderPRComment(statusError, "")
 	if !strings.Contains(body, "❌ Deploy failed") {
 		t.Fatalf("unexpected error comment body: %q", body)
@@ -455,7 +399,7 @@ func TestRenderPRCommentForErrorState(t *testing.T) {
 
 func TestRenderPRCommentForDestroyedState(t *testing.T) {
 	event := loadFixtureEvent(t, "github_event_labeled.json")
-	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
 	body := sync.renderPRComment(statusDestroyed, "")
 	if !strings.Contains(body, "🗑️ Preview destroyed") {
 		t.Fatalf("unexpected destroyed comment body: %q", body)
@@ -477,7 +421,6 @@ func TestRenderPRCommentIncludesVariantAndJob(t *testing.T) {
 	sync := newSync(event, GithubSyncOptions{
 		Label:             "pullpreview-multi-env",
 		DeploymentVariant: "env1",
-		CommentPR:         true,
 		Common:            CommonOptions{},
 	}, &fakeGitHub{}, fakeProvider{running: true})
 	body := sync.renderPRComment(statusDeploying, "")
@@ -495,13 +438,11 @@ func TestUpdatePRCommentTargetsMatchingVariantAndJobMarker(t *testing.T) {
 	syncEnv1 := newSync(event, GithubSyncOptions{
 		Label:             "pullpreview-multi-env",
 		DeploymentVariant: "env1",
-		CommentPR:         true,
 		Common:            CommonOptions{},
 	}, client, fakeProvider{running: true})
 	syncEnv2 := newSync(event, GithubSyncOptions{
 		Label:             "pullpreview-multi-env",
 		DeploymentVariant: "env2",
-		CommentPR:         true,
 		Common:            CommonOptions{},
 	}, client, fakeProvider{running: true})
 
@@ -533,7 +474,7 @@ func TestRenderStepSummaryForDeployedState(t *testing.T) {
 	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
 	t.Setenv("GITHUB_RUN_ID", "777")
 	event := loadFixtureEvent(t, "github_event_labeled.json")
-	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
 	inst := NewInstance(sync.instanceName(), CommonOptions{}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{Username: "ec2-user", IPAddress: "1.2.3.4"}
 
@@ -543,9 +484,6 @@ func TestRenderStepSummaryForDeployedState(t *testing.T) {
 	}
 	if !strings.Contains(body, "- Preview URL: [https://preview.test](https://preview.test)") {
 		t.Fatalf("missing preview URL link: %q", body)
-	}
-	if !strings.Contains(body, "/deployments/activity_log?environment=") {
-		t.Fatalf("missing deployment link: %q", body)
 	}
 	if !strings.Contains(body, "- SSH Command: `ssh ec2-user@1.2.3.4`") {
 		t.Fatalf("missing ssh command: %q", body)

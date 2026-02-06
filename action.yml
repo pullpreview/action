@@ -22,7 +22,7 @@ inputs:
     description: "Label to use for triggering preview deployments"
     default: "pullpreview"
   github_token:
-    description: "The GitHub access token used to perform GitHub API operations. A custom token is only required for auto-cleanup of GitHub environment objects."
+    description: "The GitHub access token used to perform GitHub API operations (statuses, labels, comments)."
     default: "${{ github.token }}"
   admins:
     description: "Logins of GitHub users that will have their SSH key installed on the instance, comma-separated"
@@ -80,10 +80,6 @@ inputs:
     description: "Maximum time to live for deployments (e.g. 10h, 5d, infinite)"
     required: false
     default: "infinite"
-  comment_pr:
-    description: "Whether to comment on pull requests while preview is building/ready/error"
-    required: false
-    default: "true"
 
 outputs:
   url:
@@ -156,5 +152,4 @@ runs:
           --registries "${{ inputs.registries }}" \
           --proxy-tls "${{ inputs.proxy_tls }}" \
           --pre-script "${{ inputs.pre_script }}" \
-          --ttl "${{ inputs.ttl }}" \
-          --comment-pr "${{ inputs.comment_pr }}"
+          --ttl "${{ inputs.ttl }}"

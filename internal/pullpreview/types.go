@@ -77,7 +77,6 @@ type GithubSyncOptions struct {
 	AlwaysOn          []string
 	DeploymentVariant string
 	TTL               string
-	CommentPR         bool
 	Context           context.Context
 	Common            CommonOptions
 }

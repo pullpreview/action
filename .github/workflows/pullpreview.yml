@@ -13,7 +13,6 @@ concurrency: ${{ github.ref }}
 
 permissions:
   contents: read # to fetch code (actions/checkout)
-  deployments: write # to delete deployments
   pull-requests: write # to remove labels / write PR comments
   statuses: write # to create commit status
 

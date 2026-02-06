@@ -88,47 +88,11 @@ func TestGetPullRequest(t *testing.T) {
 	}
 }
 
-func TestListEnvironments(t *testing.T) {
-	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/org/repo/environments" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		_, _ = w.Write([]byte(`{"environments":[{"name":"gh-1-pr-2"}]}`))
-	})
-	envs, err := client.ListEnvironments("org/repo")
-	if err != nil {
-		t.Fatalf("ListEnvironments() error: %v", err)
-	}
-	if len(envs) != 1 || envs[0].GetName() != "gh-1-pr-2" {
-		t.Fatalf("unexpected environments: %#v", envs)
-	}
-}
-
-func TestDeploymentsAndStatuses(t *testing.T) {
-	var createDeploymentBody string
-	var createDeploymentStatusBody string
+func TestCreateCommitStatus(t *testing.T) {
 	var createCommitStatusBody string
 
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/org/repo/deployments":
-			if got := r.URL.Query().Get("environment"); got != "gh-1-pr-2" {
-				t.Fatalf("unexpected environment query: %q", got)
-			}
-			if got := r.URL.Query().Get("ref"); got != "sha123" {
-				t.Fatalf("unexpected ref query: %q", got)
-			}
-			_, _ = w.Write([]byte(`[{"id":3}]`))
-		case r.Method == http.MethodPost && r.URL.Path == "/repos/org/repo/deployments":
-			body, _ := io.ReadAll(r.Body)
-			createDeploymentBody = string(body)
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":44}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/repos/org/repo/deployments/44/statuses":
-			body, _ := io.ReadAll(r.Body)
-			createDeploymentStatusBody = string(body)
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":7}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/org/repo/statuses/sha123":
 			body, _ := io.ReadAll(r.Body)
 			createCommitStatusBody = string(body)
@@ -139,34 +103,7 @@ func TestDeploymentsAndStatuses(t *testing.T) {
 		}
 	})
 
-	deployments, err := client.ListDeployments("org/repo", "gh-1-pr-2", "sha123")
-	if err != nil {
-		t.Fatalf("ListDeployments() error: %v", err)
-	}
-	if len(deployments) != 1 || deployments[0].GetID() != 3 {
-		t.Fatalf("unexpected deployments: %#v", deployments)
-	}
-
-	deployment, err := client.CreateDeployment("org/repo", "sha123", "gh-1-pr-2")
-	if err != nil {
-		t.Fatalf("CreateDeployment() error: %v", err)
-	}
-	if deployment.GetID() != 44 {
-		t.Fatalf("unexpected deployment ID: %d", deployment.GetID())
-	}
-	if !strings.Contains(createDeploymentBody, `"ref":"sha123"`) || !strings.Contains(createDeploymentBody, `"environment":"gh-1-pr-2"`) {
-		t.Fatalf("unexpected create deployment body: %s", createDeploymentBody)
-	}
-
-	err = client.CreateDeploymentStatus("org/repo", 44, "success", "https://example.test", true)
-	if err != nil {
-		t.Fatalf("CreateDeploymentStatus() error: %v", err)
-	}
-	if !strings.Contains(createDeploymentStatusBody, `"state":"success"`) || !strings.Contains(createDeploymentStatusBody, `"environment_url":"https://example.test"`) {
-		t.Fatalf("unexpected create deployment status body: %s", createDeploymentStatusBody)
-	}
-
-	err = client.CreateCommitStatus("org/repo", "sha123", "pending", "https://example.test", "PullPreview", "Environment deploying")
+	err := client.CreateCommitStatus("org/repo", "sha123", "pending", "https://example.test", "PullPreview", "Environment deploying")
 	if err != nil {
 		t.Fatalf("CreateCommitStatus() error: %v", err)
 	}
@@ -183,19 +120,11 @@ func TestDeleteOperations(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	if err := client.DeleteDeployment("org/repo", 12); err != nil {
-		t.Fatalf("DeleteDeployment() error: %v", err)
-	}
-	if err := client.DeleteEnvironment("org/repo", "gh-1-pr-2"); err != nil {
-		t.Fatalf("DeleteEnvironment() error: %v", err)
-	}
 	if err := client.RemoveLabel("org/repo", 10, "pullpreview"); err != nil {
 		t.Fatalf("RemoveLabel() error: %v", err)
 	}
 
 	expected := []string{
-		"DELETE /repos/org/repo/deployments/12",
-		"DELETE /repos/org/repo/environments/gh-1-pr-2",
 		"DELETE /repos/org/repo/issues/10/labels/pullpreview",
 	}
 	for _, key := range expected {
