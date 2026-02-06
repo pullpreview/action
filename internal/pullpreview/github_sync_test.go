@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	gh "github.com/google/go-github/v60/github"
@@ -22,6 +23,9 @@ type fakeGitHub struct {
 	removedLabels       []string
 	deletedDeployments  []int64
 	deletedEnvironments []string
+	comments            []*gh.IssueComment
+	createdComments     []string
+	updatedComments     []string
 }
 
 func (f *fakeGitHub) ListIssues(repo, label string) ([]*gh.Issue, error) {
@@ -72,6 +76,28 @@ func (f *fakeGitHub) DeleteEnvironment(repo, name string) error {
 
 func (f *fakeGitHub) RemoveLabel(repo string, number int, label string) error {
 	f.removedLabels = append(f.removedLabels, label)
+	return nil
+}
+
+func (f *fakeGitHub) ListIssueComments(repo string, number int) ([]*gh.IssueComment, error) {
+	return f.comments, nil
+}
+
+func (f *fakeGitHub) CreateIssueComment(repo string, number int, body string) error {
+	f.createdComments = append(f.createdComments, body)
+	id := int64(len(f.comments) + 1)
+	f.comments = append(f.comments, &gh.IssueComment{ID: gh.Int64(id), Body: gh.String(body)})
+	return nil
+}
+
+func (f *fakeGitHub) UpdateIssueComment(repo string, commentID int64, body string) error {
+	f.updatedComments = append(f.updatedComments, body)
+	for _, comment := range f.comments {
+		if comment.GetID() == commentID {
+			comment.Body = gh.String(body)
+			break
+		}
+	}
 	return nil
 }
 
@@ -177,10 +203,12 @@ func TestGuessActionFromSoloPushAlwaysOn(t *testing.T) {
 
 func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
+	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
+	t.Setenv("GITHUB_RUN_ID", "12345")
 	event := loadFixtureEvent(t, "github_event_labeled.json")
 	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
 	upCalled := false
-	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, client, fakeProvider{running: true})
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, client, fakeProvider{running: true})
 	sync.runUp = func(opts UpOptions, provider Provider, logger *Logger) (*Instance, error) {
 		upCalled = true
 		inst := NewInstance(opts.Name, opts.Common, provider, logger)
@@ -198,6 +226,15 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	}
 	if client.commitStatuses[0] != "pending" || client.commitStatuses[len(client.commitStatuses)-1] != "success" {
 		t.Fatalf("unexpected commit statuses: %v", client.commitStatuses)
+	}
+	if len(client.createdComments) != 1 {
+		t.Fatalf("expected initial PR comment creation, got %d", len(client.createdComments))
+	}
+	if len(client.updatedComments) == 0 {
+		t.Fatalf("expected PR comment update on deployed state")
+	}
+	if !strings.Contains(client.updatedComments[len(client.updatedComments)-1], "✅ Deploy successful") {
+		t.Fatalf("expected successful deploy text in comment, got %q", client.updatedComments[len(client.updatedComments)-1])
 	}
 }
 
@@ -313,12 +350,24 @@ func TestRunGithubSyncFromEnvironmentRunsUpForLabeledPR(t *testing.T) {
 	}
 	runDownFunc = func(opts DownOptions, provider Provider, logger *Logger) error { return nil }
 
-	err := RunGithubSync(GithubSyncOptions{AppPath: "/tmp/app", Label: "pullpreview", Common: CommonOptions{}}, fakeProvider{running: true}, nil)
+	err := RunGithubSync(GithubSyncOptions{AppPath: "/tmp/app", Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, fakeProvider{running: true}, nil)
 	if err != nil {
 		t.Fatalf("RunGithubSync() error: %v", err)
 	}
 	if !upCalled {
 		t.Fatalf("expected up flow to be executed")
+	}
+}
+
+func TestRenderPRCommentForErrorState(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
+	body := sync.renderPRComment(statusError, "")
+	if !strings.Contains(body, "❌ Deploy failed") {
+		t.Fatalf("unexpected error comment body: %q", body)
+	}
+	if !strings.Contains(body, sync.prCommentMarker()) {
+		t.Fatalf("missing marker in rendered comment")
 	}
 }
 

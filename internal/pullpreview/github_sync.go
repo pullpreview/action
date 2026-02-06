@@ -30,6 +30,9 @@ type GitHubAPI interface {
 	DeleteDeployment(repo string, deploymentID int64) error
 	DeleteEnvironment(repo, name string) error
 	RemoveLabel(repo string, number int, label string) error
+	ListIssueComments(repo string, number int) ([]*gh.IssueComment, error)
+	CreateIssueComment(repo string, number int, body string) error
+	UpdateIssueComment(repo string, commentID int64, body string) error
 	ListPullRequests(repo, head string) ([]*gh.PullRequest, error)
 	LatestCommitSHA(repo, ref string) (string, error)
 	ListCollaborators(repo string) ([]*gh.User, error)
@@ -468,6 +471,7 @@ func (g *GithubSync) updateGitHubStatus(status deploymentStatus, url string) err
 		g.logger.Infof("Setting commit status repo=%s sha=%s status=%s", g.repo(), g.sha(), commitStatus)
 	}
 	_ = g.client.CreateCommitStatus(g.repo(), g.sha(), commitStatus, url, context, description)
+	g.updatePRComment(status, url)
 
 	deploymentStatus := g.deploymentStatusFor(status)
 	if deploymentStatus == "" {
@@ -482,6 +486,83 @@ func (g *GithubSync) updateGitHubStatus(status deploymentStatus, url string) err
 		destroyEnvironment(g.repo(), g.instanceName(), g.client, g.logger)
 	}
 	return nil
+}
+
+func (g *GithubSync) updatePRComment(status deploymentStatus, previewURL string) {
+	if !g.opts.CommentPR || g.prNumber() == 0 {
+		return
+	}
+	body := g.renderPRComment(status, previewURL)
+	if body == "" {
+		return
+	}
+	comments, err := g.client.ListIssueComments(g.repo(), g.prNumber())
+	if err != nil {
+		if g.logger != nil {
+			g.logger.Warnf("Unable to list PR comments for PR#%d: %v", g.prNumber(), err)
+		}
+		return
+	}
+	marker := g.prCommentMarker()
+	for _, comment := range comments {
+		if strings.Contains(comment.GetBody(), marker) {
+			if err := g.client.UpdateIssueComment(g.repo(), comment.GetID(), body); err != nil && g.logger != nil {
+				g.logger.Warnf("Unable to update PR comment for PR#%d: %v", g.prNumber(), err)
+			}
+			return
+		}
+	}
+	if err := g.client.CreateIssueComment(g.repo(), g.prNumber(), body); err != nil && g.logger != nil {
+		g.logger.Warnf("Unable to create PR comment for PR#%d: %v", g.prNumber(), err)
+	}
+}
+
+func (g *GithubSync) prCommentMarker() string {
+	return fmt.Sprintf("<!-- pullpreview-status:%s -->", g.instanceName())
+}
+
+func (g *GithubSync) renderPRComment(status deploymentStatus, previewURL string) string {
+	statusText := ""
+	switch status {
+	case statusDeploying:
+		statusText = "⏳ Deploying preview..."
+	case statusDeployed:
+		statusText = "✅ Deploy successful"
+	case statusError:
+		statusText = "❌ Deploy failed"
+	default:
+		return ""
+	}
+	commit := g.sha()
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	preview := "_Pending_"
+	if strings.TrimSpace(previewURL) != "" {
+		preview = fmt.Sprintf("[%s](%s)", previewURL, previewURL)
+	}
+	logs := g.workflowRunURL()
+	logsLine := ""
+	if logs != "" {
+		logsLine = fmt.Sprintf("\n[View logs](%s)\n", logs)
+	}
+	return fmt.Sprintf(
+		"%s\n### PullPreview Deployment\n\n| Field | Value |\n|---|---|\n| Latest commit | `%s` |\n| Status | %s |\n| Preview URL | %s |\n%s",
+		g.prCommentMarker(),
+		commit,
+		statusText,
+		preview,
+		logsLine,
+	)
+}
+
+func (g *GithubSync) workflowRunURL() string {
+	server := strings.TrimSuffix(os.Getenv("GITHUB_SERVER_URL"), "/")
+	runID := strings.TrimSpace(os.Getenv("GITHUB_RUN_ID"))
+	if server == "" || runID == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s/actions/runs/%s", server, g.repo(), runID)
 }
 
 func (g *GithubSync) deployment() *gh.Deployment {

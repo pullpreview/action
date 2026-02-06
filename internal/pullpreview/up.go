@@ -3,6 +3,7 @@ package pullpreview
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -44,16 +45,20 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 	if err := instance.SetupScripts(); err != nil {
 		return nil, err
 	}
+	if logger != nil {
+		logger.Infof("SSH keys and deploy scripts synced on instance")
+	}
 
 	instructions := fmt.Sprintf("\nTo connect to the instance (authorized GitHub users: %s):\n  ssh %s\n", join(instance.Admins, ", "), instance.SSHAddress())
 	stop := make(chan struct{})
+	emitDeploymentHeartbeat(instance, logger)
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				fmt.Println(instructions)
+				emitDeploymentHeartbeat(instance, logger)
 			case <-stop:
 				return
 			}
@@ -93,6 +98,24 @@ func join(values []string, sep string) string {
 		out += v
 	}
 	return out
+}
+
+func emitDeploymentHeartbeat(instance *Instance, logger *Logger) {
+	admins := join(instance.Admins, ", ")
+	if strings.TrimSpace(admins) == "" {
+		admins = "none"
+	}
+	line := fmt.Sprintf(
+		"Heartbeat: preview_url=%s ssh=\"ssh %s\" authorized_users=\"%s\" (keys uploaded on server)",
+		instance.URL(),
+		instance.SSHAddress(),
+		admins,
+	)
+	if logger != nil {
+		logger.Infof(line)
+		return
+	}
+	fmt.Println(line)
 }
 
 func writeGithubOutputs(instance *Instance) {

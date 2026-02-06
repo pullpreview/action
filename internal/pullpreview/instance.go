@@ -114,7 +114,12 @@ func (i *Instance) LaunchAndWait() error {
 	}
 	if ok := WaitUntil(30, 5*time.Second, func() bool {
 		if i.Logger != nil {
-			i.Logger.Infof("Waiting for ssh")
+			i.Logger.Infof(
+				"Waiting for SSH username=%s ip=%s ssh=\"ssh %s\"",
+				i.Username(),
+				i.PublicIP(),
+				i.SSHAddress(),
+			)
 		}
 		return i.SSHReady()
 	}); !ok {

@@ -1,11 +1,25 @@
-build:
-	docker build -t pullpreview/pullpreview:$(TAG) .
+GO ?= mise exec -- go
+DIST_DIR := dist
+BIN_NAME := pullpreview
 
-shell:
-	docker run -e GITHUB_SHA=9cdcde5f00b76c97db398210dd5460b259176f9b -e GITHUB_TOKEN -e GITHUB_EVENT_PATH=/app/test/fixtures/github_event_push.json -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY --entrypoint /bin/sh -it --rm -v $(shell pwd):/app pullpreview/pullpreview
+DIST_BINARIES := \
+	$(DIST_DIR)/$(BIN_NAME)-linux-amd64 \
+	$(DIST_DIR)/$(BIN_NAME)-linux-arm64
 
-bundle:
-	docker run --rm -v $(shell pwd):/app -w /app ruby:2-alpine bundle
+.PHONY: dist clean-dist test
 
-release: build
-	docker push pullpreview/pullpreview:$(TAG)
+dist: clean-dist $(DIST_BINARIES)
+
+$(DIST_DIR)/$(BIN_NAME)-linux-amd64:
+	mkdir -p $(DIST_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -o $@ ./cmd/pullpreview
+
+$(DIST_DIR)/$(BIN_NAME)-linux-arm64:
+	mkdir -p $(DIST_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o $@ ./cmd/pullpreview
+
+clean-dist:
+	rm -f $(DIST_DIR)/$(BIN_NAME)-linux-amd64 $(DIST_DIR)/$(BIN_NAME)-linux-arm64
+
+test:
+	$(GO) test ./...

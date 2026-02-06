@@ -115,6 +115,30 @@ func (c *Client) RemoveLabel(repo string, number int, label string) error {
 	return err
 }
 
+func (c *Client) ListIssueComments(repo string, number int) ([]*gh.IssueComment, error) {
+	owner, name := splitRepo(repo)
+	comments, _, err := c.api.Issues.ListComments(context.Background(), owner, name, number, &gh.IssueListCommentsOptions{
+		ListOptions: gh.ListOptions{PerPage: 100},
+	})
+	return comments, err
+}
+
+func (c *Client) CreateIssueComment(repo string, number int, body string) error {
+	owner, name := splitRepo(repo)
+	_, _, err := c.api.Issues.CreateComment(context.Background(), owner, name, number, &gh.IssueComment{
+		Body: gh.String(body),
+	})
+	return err
+}
+
+func (c *Client) UpdateIssueComment(repo string, commentID int64, body string) error {
+	owner, name := splitRepo(repo)
+	_, _, err := c.api.Issues.EditComment(context.Background(), owner, name, commentID, &gh.IssueComment{
+		Body: gh.String(body),
+	})
+	return err
+}
+
 func (c *Client) ListPullRequests(repo, head string) ([]*gh.PullRequest, error) {
 	owner, name := splitRepo(repo)
 	opts := &gh.PullRequestListOptions{State: "open", Head: head, ListOptions: gh.ListOptions{PerPage: 100}}
