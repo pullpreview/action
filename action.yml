@@ -110,6 +110,7 @@ runs:
         PULLPREVIEW_PROVIDER: "${{ inputs.provider }}"
         PULLPREVIEW_MAX_DOMAIN_LENGTH: "${{ inputs.max_domain_length }}"
         PULLPREVIEW_SSH_KEYS_CACHE_DIR: "${{ runner.temp }}/pullpreview-ssh-keys"
+        PULLPREVIEW_GITHUB_JOB_ID: "${{ job.check_run_id }}"
       run: |
         set -euo pipefail
         mkdir -p "${PULLPREVIEW_SSH_KEYS_CACHE_DIR}"

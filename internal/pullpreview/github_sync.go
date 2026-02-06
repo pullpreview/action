@@ -520,7 +520,7 @@ func (g *GithubSync) renderStepSummary(status deploymentStatus, action actionTyp
 		b.WriteString(fmt.Sprintf("- SSH Command: `ssh %s`\n", inst.SSHAddress()))
 	}
 
-	b.WriteString("\nPowered by [PullPreview](https://pullpreview.com).\n")
+	b.WriteString("\nPowered by [⚡](https://pullpreview.com) PullPreview.\n")
 	return b.String()
 }
 
@@ -551,6 +551,10 @@ func (g *GithubSync) workflowRunURL() string {
 	runID := strings.TrimSpace(os.Getenv("GITHUB_RUN_ID"))
 	if server == "" || runID == "" {
 		return ""
+	}
+	jobID := strings.TrimSpace(os.Getenv("PULLPREVIEW_GITHUB_JOB_ID"))
+	if jobID != "" {
+		return fmt.Sprintf("%s/%s/actions/runs/%s/job/%s", server, g.repo(), runID, jobID)
 	}
 	return fmt.Sprintf("%s/%s/actions/runs/%s", server, g.repo(), runID)
 }

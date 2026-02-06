@@ -183,6 +183,7 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
 	t.Setenv("GITHUB_RUN_ID", "12345")
+	t.Setenv("PULLPREVIEW_GITHUB_JOB_ID", "67890")
 	t.Setenv("GITHUB_STEP_SUMMARY", filepath.Join(t.TempDir(), "summary.md"))
 	event := loadFixtureEvent(t, "github_event_labeled.json")
 	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
@@ -211,6 +212,9 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	}
 	if !strings.Contains(client.updatedComments[len(client.updatedComments)-1], "[⚡](https://pullpreview.com) PullPreview") {
 		t.Fatalf("expected pullpreview lightning link in comment title, got %q", client.updatedComments[len(client.updatedComments)-1])
+	}
+	if !strings.Contains(client.updatedComments[len(client.updatedComments)-1], "/actions/runs/12345/job/67890") {
+		t.Fatalf("expected job URL log link in comment, got %q", client.updatedComments[len(client.updatedComments)-1])
 	}
 }
 
@@ -445,6 +449,7 @@ func TestUpdatePRCommentTargetsMatchingVariantAndJobMarker(t *testing.T) {
 func TestRenderStepSummaryForDeployedState(t *testing.T) {
 	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
 	t.Setenv("GITHUB_RUN_ID", "777")
+	t.Setenv("PULLPREVIEW_GITHUB_JOB_ID", "888")
 	event := loadFixtureEvent(t, "github_event_labeled.json")
 	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
 	inst := NewInstance(sync.instanceName(), CommonOptions{}, fakeProvider{}, nil)
@@ -460,7 +465,10 @@ func TestRenderStepSummaryForDeployedState(t *testing.T) {
 	if !strings.Contains(body, "- SSH Command: `ssh ec2-user@1.2.3.4`") {
 		t.Fatalf("missing ssh command: %q", body)
 	}
-	if !strings.Contains(body, "Powered by [PullPreview](https://pullpreview.com).") {
+	if !strings.Contains(body, "/actions/runs/777/job/888") {
+		t.Fatalf("missing job-level logs URL: %q", body)
+	}
+	if !strings.Contains(body, "Powered by [⚡](https://pullpreview.com) PullPreview.") {
 		t.Fatalf("missing powered by line: %q", body)
 	}
 }

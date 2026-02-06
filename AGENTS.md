@@ -18,6 +18,7 @@ This repository ships a GitHub Action implemented in Go.
   - Commit source changes first.
   - Run `make dist` afterwards.
   - `make dist` auto-commits the updated bundled binary with a standard commit message.
+  - Before merging, `make rewrite` can rewrite the current branch and drop dist-only auto-commits (force-push required).
 
 ## CLI
 Entrypoint source is `cmd/pullpreview/main.go`.
