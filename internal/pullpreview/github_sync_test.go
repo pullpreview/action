@@ -183,6 +183,16 @@ func TestGuessActionFromLabeledFixture(t *testing.T) {
 	}
 }
 
+func TestGuessActionFromLabeledFixtureWithCustomLabel(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	event.Label = &GitHubLabel{Name: "pullpreview-multi-env"}
+	event.PullRequest.Labels = []GitHubLabel{{Name: "pullpreview-multi-env"}}
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview-multi-env", DeploymentVariant: "env1", Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
+	if got := sync.guessAction(); got != actionPRUp {
+		t.Fatalf("guessAction()=%s, want %s", got, actionPRUp)
+	}
+}
+
 func TestGuessActionFromPushFixtureWithPR(t *testing.T) {
 	event := loadFixtureEvent(t, "github_event_push.json")
 	client := &fakeGitHub{
@@ -458,6 +468,64 @@ func TestRenderPRCommentForDestroyedState(t *testing.T) {
 	}
 	if !strings.Contains(body, "[⚡](https://pullpreview.com) PullPreview") {
 		t.Fatalf("missing pullpreview lightning title: %q", body)
+	}
+}
+
+func TestRenderPRCommentIncludesVariantAndJob(t *testing.T) {
+	t.Setenv("GITHUB_JOB", "deploy_env1")
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	sync := newSync(event, GithubSyncOptions{
+		Label:             "pullpreview-multi-env",
+		DeploymentVariant: "env1",
+		CommentPR:         true,
+		Common:            CommonOptions{},
+	}, &fakeGitHub{}, fakeProvider{running: true})
+	body := sync.renderPRComment(statusDeploying, "")
+	if !strings.Contains(body, "| Variant | `env1` |") {
+		t.Fatalf("expected variant row in comment body: %q", body)
+	}
+	if !strings.Contains(body, "| Job | `deploy_env1` |") {
+		t.Fatalf("expected job row in comment body: %q", body)
+	}
+}
+
+func TestUpdatePRCommentTargetsMatchingVariantAndJobMarker(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	client := &fakeGitHub{}
+	syncEnv1 := newSync(event, GithubSyncOptions{
+		Label:             "pullpreview-multi-env",
+		DeploymentVariant: "env1",
+		CommentPR:         true,
+		Common:            CommonOptions{},
+	}, client, fakeProvider{running: true})
+	syncEnv2 := newSync(event, GithubSyncOptions{
+		Label:             "pullpreview-multi-env",
+		DeploymentVariant: "env2",
+		CommentPR:         true,
+		Common:            CommonOptions{},
+	}, client, fakeProvider{running: true})
+
+	t.Setenv("GITHUB_JOB", "deploy_env1")
+	env1Marker := syncEnv1.prCommentMarker()
+	t.Setenv("GITHUB_JOB", "deploy_env2")
+	env2Marker := syncEnv2.prCommentMarker()
+	t.Setenv("GITHUB_JOB", "deploy_env1")
+
+	client.comments = []*gh.IssueComment{
+		{ID: gh.Int64(101), Body: gh.String(env1Marker + "\nold env1 body")},
+		{ID: gh.Int64(102), Body: gh.String(env2Marker + "\nold env2 body")},
+	}
+
+	syncEnv1.updatePRComment(statusDeployed, "https://env1.preview.example")
+
+	if len(client.updatedComments) != 1 {
+		t.Fatalf("expected exactly one updated comment, got %d", len(client.updatedComments))
+	}
+	if !strings.Contains(client.comments[0].GetBody(), "https://env1.preview.example") {
+		t.Fatalf("expected env1 comment update, got %q", client.comments[0].GetBody())
+	}
+	if strings.Contains(client.comments[1].GetBody(), "https://env1.preview.example") {
+		t.Fatalf("env2 comment was incorrectly updated: %q", client.comments[1].GetBody())
 	}
 }
 

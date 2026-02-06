@@ -77,3 +77,6 @@ Supported commands:
 - `internal/github`: GitHub API wrapper
 - `internal/license`: license check client
 - `dist/`: bundled Linux amd64 binary used by the action
+
+## Repo-local skill
+- `skills/pullpreview-demo-flow/SKILL.md`: repeatable end-to-end demo capture workflow (PR open/label/deploy/view deployment/unlabel/destroy) with strict screenshot requirements and fixed demo PR title.
