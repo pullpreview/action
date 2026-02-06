@@ -2,36 +2,15 @@ package pullpreview
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 )
 
 func BuildPreScript(registries []string, preScript string, logger *Logger) string {
 	lines := []string{"#!/bin/bash -e"}
-	for i, registry := range registries {
-		registry = strings.TrimSpace(registry)
-		if registry == "" {
-			continue
-		}
-		uri, err := url.Parse(registry)
-		if err != nil || uri.Host == "" || uri.Scheme != "docker" {
-			if logger != nil {
-				if err == nil {
-					err = fmt.Errorf("invalid registry")
-				}
-				logger.Warnf("Registry #%d is invalid: %v", i, err)
-			}
-			continue
-		}
-		username := uri.User.Username()
-		password, hasPassword := uri.User.Password()
-		if !hasPassword {
-			password = username
-			username = "doesnotmatter"
-		}
+	for _, registry := range ParseRegistryCredentials(registries, logger) {
 		lines = append(lines,
-			fmt.Sprintf("echo \"Logging into %s...\"", uri.Host),
-			fmt.Sprintf("echo \"%s\" | docker login \"%s\" -u \"%s\" --password-stdin", password, uri.Host, username),
+			fmt.Sprintf("echo \"Logging into %s...\"", registry.Host),
+			fmt.Sprintf("echo \"%s\" | docker login \"%s\" -u \"%s\" --password-stdin", registry.Password, registry.Host, registry.Username),
 		)
 	}
 	if strings.TrimSpace(preScript) != "" {
