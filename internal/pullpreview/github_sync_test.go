@@ -216,6 +216,7 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
 	t.Setenv("GITHUB_RUN_ID", "12345")
+	t.Setenv("GITHUB_STEP_SUMMARY", filepath.Join(t.TempDir(), "summary.md"))
 	event := loadFixtureEvent(t, "github_event_labeled.json")
 	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
 	upCalled := false
@@ -246,6 +247,9 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	}
 	if !strings.Contains(client.updatedComments[len(client.updatedComments)-1], "✅ Deploy successful") {
 		t.Fatalf("expected successful deploy text in comment, got %q", client.updatedComments[len(client.updatedComments)-1])
+	}
+	if !strings.Contains(client.updatedComments[len(client.updatedComments)-1], "[⚡](https://pullpreview.com) PullPreview") {
+		t.Fatalf("expected pullpreview lightning link in comment title, got %q", client.updatedComments[len(client.updatedComments)-1])
 	}
 }
 
@@ -291,6 +295,7 @@ func TestSyncClosedPRRunsDownAndRemovesLabel(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
 	t.Setenv("GITHUB_RUN_ID", "12345")
+	t.Setenv("GITHUB_STEP_SUMMARY", filepath.Join(t.TempDir(), "summary.md"))
 	event := GitHubEvent{
 		Action: "closed",
 		PullRequest: &GitHubPR{
@@ -450,6 +455,35 @@ func TestRenderPRCommentForDestroyedState(t *testing.T) {
 	}
 	if !strings.Contains(body, sync.prCommentMarker()) {
 		t.Fatalf("missing marker in rendered comment")
+	}
+	if !strings.Contains(body, "[⚡](https://pullpreview.com) PullPreview") {
+		t.Fatalf("missing pullpreview lightning title: %q", body)
+	}
+}
+
+func TestRenderStepSummaryForDeployedState(t *testing.T) {
+	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
+	t.Setenv("GITHUB_RUN_ID", "777")
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", CommentPR: true, Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
+	inst := NewInstance(sync.instanceName(), CommonOptions{}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{Username: "ec2-user", IPAddress: "1.2.3.4"}
+
+	body := sync.renderStepSummary(statusDeployed, actionPRUp, "https://preview.test", inst)
+	if !strings.Contains(body, "## PullPreview Summary") {
+		t.Fatalf("missing summary header: %q", body)
+	}
+	if !strings.Contains(body, "- Preview URL: [https://preview.test](https://preview.test)") {
+		t.Fatalf("missing preview URL link: %q", body)
+	}
+	if !strings.Contains(body, "/deployments/activity_log?environment=") {
+		t.Fatalf("missing deployment link: %q", body)
+	}
+	if !strings.Contains(body, "- SSH Command: `ssh ec2-user@1.2.3.4`") {
+		t.Fatalf("missing ssh command: %q", body)
+	}
+	if !strings.Contains(body, "Powered by [PullPreview](https://pullpreview.com).") {
+		t.Fatalf("missing powered by line: %q", body)
 	}
 }
 
