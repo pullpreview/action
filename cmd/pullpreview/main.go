@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/pullpreview/action/internal/providers/lightsail"
 	"github.com/pullpreview/action/internal/pullpreview"
 )
 
 func main() {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(1)
@@ -25,13 +30,13 @@ func main() {
 
 	switch cmd {
 	case "up":
-		runUp(args, logger)
+		runUp(ctx, args, logger)
 	case "down":
-		runDown(args, logger)
+		runDown(ctx, args, logger)
 	case "github-sync":
-		runGithubSync(args, logger)
+		runGithubSync(ctx, args, logger)
 	case "list":
-		runList(args, logger)
+		runList(ctx, args, logger)
 	default:
 		usage()
 		os.Exit(1)
@@ -42,7 +47,7 @@ func usage() {
 	fmt.Println("Usage: pullpreview [up|down|list|github-sync] [options]")
 }
 
-func runUp(args []string, logger *pullpreview.Logger) {
+func runUp(ctx context.Context, args []string, logger *pullpreview.Logger) {
 	fs := flag.NewFlagSet("up", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	name := fs.String("name", "", "Unique name for the environment (optional for local use)")
@@ -63,8 +68,8 @@ func runUp(args []string, logger *pullpreview.Logger) {
 	if strings.TrimSpace(*name) == "" {
 		*name = defaultUpName(appPath)
 	}
-	provider := mustProvider(logger)
-	_, err := pullpreview.RunUp(pullpreview.UpOptions{AppPath: appPath, Name: *name, Common: commonFlags.ToOptions()}, provider, logger)
+	provider := mustProvider(ctx, logger)
+	_, err := pullpreview.RunUp(pullpreview.UpOptions{AppPath: appPath, Name: *name, Common: commonFlags.ToOptions(ctx)}, provider, logger)
 	if err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -83,7 +88,7 @@ func defaultUpName(appPath string) string {
 	return pullpreview.NormalizeName("local-" + base)
 }
 
-func runDown(args []string, logger *pullpreview.Logger) {
+func runDown(ctx context.Context, args []string, logger *pullpreview.Logger) {
 	fs := flag.NewFlagSet("down", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	name := fs.String("name", "", "Name of the environment to destroy")
@@ -95,14 +100,14 @@ func runDown(args []string, logger *pullpreview.Logger) {
 		fmt.Println("Usage: pullpreview down --name <name>")
 		os.Exit(1)
 	}
-	provider := mustProvider(logger)
+	provider := mustProvider(ctx, logger)
 	if err := pullpreview.RunDown(pullpreview.DownOptions{Name: *name}, provider, logger); err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
 	}
 }
 
-func runGithubSync(args []string, logger *pullpreview.Logger) {
+func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logger) {
 	fs := flag.NewFlagSet("github-sync", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	label := fs.String("label", "pullpreview", "Label to use for triggering preview deployments")
@@ -124,7 +129,7 @@ func runGithubSync(args []string, logger *pullpreview.Logger) {
 		fmt.Println("Usage: pullpreview github-sync path/to/app [options]")
 		os.Exit(1)
 	}
-	provider := mustProvider(logger)
+	provider := mustProvider(ctx, logger)
 	opts := pullpreview.GithubSyncOptions{
 		AppPath:           appPath,
 		Label:             *label,
@@ -132,7 +137,8 @@ func runGithubSync(args []string, logger *pullpreview.Logger) {
 		DeploymentVariant: *deploymentVariant,
 		TTL:               *ttl,
 		CommentPR:         *commentPR,
-		Common:            commonFlags.ToOptions(),
+		Context:           ctx,
+		Common:            commonFlags.ToOptions(ctx),
 	}
 	if err := pullpreview.RunGithubSync(opts, provider, logger); err != nil {
 		fmt.Println("Error:", err)
@@ -140,7 +146,7 @@ func runGithubSync(args []string, logger *pullpreview.Logger) {
 	}
 }
 
-func runList(args []string, logger *pullpreview.Logger) {
+func runList(ctx context.Context, args []string, logger *pullpreview.Logger) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	org := fs.String("org", "", "Restrict to given organization name")
@@ -163,7 +169,7 @@ func runList(args []string, logger *pullpreview.Logger) {
 			*repo = parts[1]
 		}
 	}
-	provider := mustProvider(logger)
+	provider := mustProvider(ctx, logger)
 	if err := pullpreview.RunList(pullpreview.ListOptions{Org: *org, Repo: *repo}, provider, logger); err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -198,8 +204,9 @@ func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 	return values
 }
 
-func (c *commonFlagValues) ToOptions() pullpreview.CommonOptions {
+func (c *commonFlagValues) ToOptions(ctx context.Context) pullpreview.CommonOptions {
 	opts := c.options
+	opts.Context = ctx
 	opts.Admins = splitCommaList(c.admins)
 	opts.CIDRs = splitCommaList(c.cidrs)
 	opts.Registries = splitCommaList(c.registries)
@@ -260,10 +267,10 @@ func splitLeadingPositional(args []string) (string, []string) {
 	return first, args[1:]
 }
 
-func mustProvider(logger *pullpreview.Logger) pullpreview.Provider {
+func mustProvider(ctx context.Context, logger *pullpreview.Logger) pullpreview.Provider {
 	providerName := strings.TrimSpace(os.Getenv("PULLPREVIEW_PROVIDER"))
 	if providerName == "" || providerName == "lightsail" {
-		provider, err := lightsail.New(context.Background(), os.Getenv("AWS_REGION"), logger)
+		provider, err := lightsail.New(ctx, os.Getenv("AWS_REGION"), logger)
 		if err != nil {
 			fmt.Println("Error:", err)
 			os.Exit(1)

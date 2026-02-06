@@ -2,6 +2,7 @@ package pullpreview
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -99,7 +100,7 @@ func (i *Instance) composeConfigForRemoteContext(appPath string) ([]byte, error)
 	}
 	args = append(args, "config", "--format", "json")
 
-	cmd := exec.Command("docker", args...)
+	cmd := exec.CommandContext(i.Context, "docker", args...)
 	cmd.Dir = absAppPath
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -204,7 +205,7 @@ func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 	contextName := fmt.Sprintf("pullpreview-%s-%d", i.Name, time.Now().UnixNano())
 	env := os.Environ()
 
-	createContext := exec.Command("docker", "context", "create", contextName, "--docker", "host=ssh://"+hostAlias)
+	createContext := exec.CommandContext(i.Context, "docker", "context", "create", contextName, "--docker", "host=ssh://"+hostAlias)
 	createContext.Env = env
 	createContext.Stdout = os.Stdout
 	createContext.Stderr = os.Stderr
@@ -212,7 +213,7 @@ func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 		return fmt.Errorf("unable to create docker context: %w", err)
 	}
 	defer func() {
-		removeCmd := exec.Command("docker", "context", "rm", "-f", contextName)
+		removeCmd := exec.CommandContext(i.Context, "docker", "context", "rm", "-f", contextName)
 		removeCmd.Env = env
 		removeCmd.Stdout = os.Stdout
 		removeCmd.Stderr = os.Stderr
@@ -220,7 +221,7 @@ func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 	}()
 
 	credentials := ParseRegistryCredentials(i.Registries, i.Logger)
-	if err := loginRegistriesOnRunner(credentials, env); err != nil {
+	if err := loginRegistriesOnRunner(i.Context, credentials, env); err != nil {
 		return err
 	}
 
@@ -247,9 +248,10 @@ func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 	return nil
 }
 
-func loginRegistriesOnRunner(credentials []RegistryCredential, env []string) error {
+func loginRegistriesOnRunner(ctx context.Context, credentials []RegistryCredential, env []string) error {
+	ctx = ensureContext(ctx)
 	for _, cred := range credentials {
-		cmd := exec.Command("docker", "login", cred.Host, "-u", cred.Username, "--password-stdin")
+		cmd := exec.CommandContext(ctx, "docker", "login", cred.Host, "-u", cred.Username, "--password-stdin")
 		cmd.Env = env
 		cmd.Stdin = strings.NewReader(cred.Password + "\n")
 		cmd.Stdout = os.Stdout
@@ -320,7 +322,7 @@ func (i *Instance) runComposeCommandWithConfig(env []string, contextName string,
 		"-f", "-",
 	}
 	cmdArgs = append(cmdArgs, args...)
-	cmd := exec.Command("docker", cmdArgs...)
+	cmd := exec.CommandContext(i.Context, "docker", cmdArgs...)
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(composeConfig)
 	cmd.Stdout = os.Stdout

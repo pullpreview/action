@@ -1,10 +1,13 @@
 package pullpreview
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,9 +17,11 @@ import (
 )
 
 var (
-	newGitHubClient = func(token string) GitHubAPI { return ghclient.New(token) }
-	runUpFunc       = RunUp
-	runDownFunc     = RunDown
+	newGitHubClient = func(ctx context.Context, token string) GitHubAPI {
+		return ghclient.NewWithContext(EnsureContext(ctx), token)
+	}
+	runUpFunc   = RunUp
+	runDownFunc = RunDown
 )
 
 type GitHubAPI interface {
@@ -35,7 +40,8 @@ type GitHubAPI interface {
 	UpdateIssueComment(repo string, commentID int64, body string) error
 	ListPullRequests(repo, head string) ([]*gh.PullRequest, error)
 	LatestCommitSHA(repo, ref string) (string, error)
-	ListCollaborators(repo string) ([]*gh.User, error)
+	ListCollaborators(repo string) ([]*gh.User, bool, error)
+	ListUserPublicKeys(user string) ([]string, error)
 }
 
 type GitHubEvent struct {
@@ -98,6 +104,12 @@ type GithubSync struct {
 }
 
 func RunGithubSync(opts GithubSyncOptions, provider Provider, logger *Logger) error {
+	opts.Context = EnsureContext(opts.Context)
+	if opts.Common.Context == nil {
+		opts.Common.Context = opts.Context
+	} else {
+		opts.Common.Context = EnsureContext(opts.Common.Context)
+	}
 	eventName := os.Getenv("GITHUB_EVENT_NAME")
 	if logger != nil {
 		logger.Debugf("github_event_name=%s", eventName)
@@ -119,13 +131,14 @@ func RunGithubSync(opts GithubSyncOptions, provider Provider, logger *Logger) er
 		return err
 	}
 
-	client := newGitHubClient(os.Getenv("GITHUB_TOKEN"))
+	client := newGitHubClient(opts.Context, os.Getenv("GITHUB_TOKEN"))
 	sync := &GithubSync{event: event, appPath: opts.AppPath, opts: opts, client: client, provider: provider, logger: logger, runUp: runUpFunc, runDown: runDownFunc}
 	return sync.Sync()
 }
 
 func runScheduledCleanup(repo string, opts GithubSyncOptions, provider Provider, logger *Logger) error {
-	client := newGitHubClient(os.Getenv("GITHUB_TOKEN"))
+	opts.Context = EnsureContext(opts.Context)
+	client := newGitHubClient(opts.Context, os.Getenv("GITHUB_TOKEN"))
 	if logger != nil {
 		logger.Infof("[clear_dangling_deployments] start")
 	}
@@ -636,8 +649,14 @@ func (g *GithubSync) branch() string {
 }
 
 func (g *GithubSync) expandedAdmins() []string {
+	admins, _ := g.expandedAdminsAndKeys()
+	return admins
+}
+
+func (g *GithubSync) expandedAdminsAndKeys() ([]string, []string) {
 	admins := append([]string{}, g.opts.Common.Admins...)
 	final := []string{}
+	keyLogins := []string{}
 	collaboratorsToken := "@collaborators/push"
 	needCollabs := false
 	for _, admin := range admins {
@@ -648,19 +667,128 @@ func (g *GithubSync) expandedAdmins() []string {
 		}
 		if admin != "" {
 			final = append(final, admin)
+			keyLogins = append(keyLogins, admin)
 		}
 	}
 	if needCollabs {
-		collabs, err := g.client.ListCollaborators(g.repo())
+		collabs, truncated, err := g.client.ListCollaborators(g.repo())
 		if err == nil {
 			for _, user := range collabs {
-				if user.Permissions != nil && user.Permissions["push"] {
-					final = append(final, user.GetLogin())
+				if user.Permissions == nil || user.Permissions["push"] {
+					login := strings.TrimSpace(user.GetLogin())
+					if login == "" {
+						continue
+					}
+					final = append(final, login)
+					keyLogins = append(keyLogins, login)
 				}
 			}
+			if truncated && g.logger != nil {
+				g.logger.Warnf("Found more than 100 collaborators with push access. Only the first 100 will receive SSH access.")
+			}
+		} else if g.logger != nil {
+			g.logger.Warnf("Unable to list collaborators for %s: %v", g.repo(), err)
 		}
 	}
-	return uniqueStrings(final)
+	final = uniqueStrings(final)
+	keys := []string{}
+	for _, login := range uniqueStrings(keyLogins) {
+		userKeys, err := g.userPublicKeys(login)
+		if err != nil {
+			if g.logger != nil {
+				g.logger.Warnf("Unable to resolve SSH keys for %s: %v", login, err)
+			}
+			continue
+		}
+		keys = append(keys, userKeys...)
+	}
+	return final, uniqueStrings(keys)
+}
+
+var sshKeyCacheFilenameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+
+func (g *GithubSync) userPublicKeys(login string) ([]string, error) {
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return nil, nil
+	}
+	if keys, ok := g.loadCachedUserPublicKeys(login); ok {
+		return keys, nil
+	}
+	keys, err := g.client.ListUserPublicKeys(login)
+	if err != nil {
+		return nil, err
+	}
+	keys = uniqueStrings(keys)
+	if len(keys) == 0 {
+		return keys, nil
+	}
+	_ = g.saveCachedUserPublicKeys(login, keys)
+	return keys, nil
+}
+
+func (g *GithubSync) sshKeysCacheDir() string {
+	return strings.TrimSpace(os.Getenv("PULLPREVIEW_SSH_KEYS_CACHE_DIR"))
+}
+
+func (g *GithubSync) sshKeysCachePath(login string) string {
+	dir := g.sshKeysCacheDir()
+	if dir == "" {
+		return ""
+	}
+	filename := sshKeyCacheFilenameSanitizer.ReplaceAllString(strings.ToLower(strings.TrimSpace(login)), "-")
+	filename = strings.Trim(filename, "-")
+	if filename == "" {
+		return ""
+	}
+	return filepath.Join(dir, filename+".keys")
+}
+
+func (g *GithubSync) loadCachedUserPublicKeys(login string) ([]string, bool) {
+	path := g.sshKeysCachePath(login)
+	if path == "" {
+		return nil, false
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	keys := []string{}
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			keys = append(keys, line)
+		}
+	}
+	keys = uniqueStrings(keys)
+	if len(keys) == 0 {
+		return nil, false
+	}
+	if g.logger != nil {
+		g.logger.Debugf("Loaded %d SSH key(s) for %s from cache", len(keys), login)
+	}
+	return keys, true
+}
+
+func (g *GithubSync) saveCachedUserPublicKeys(login string, keys []string) error {
+	path := g.sshKeysCachePath(login)
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	content := strings.Join(uniqueStrings(keys), "\n")
+	if content != "" {
+		content += "\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return err
+	}
+	if g.logger != nil {
+		g.logger.Debugf("Cached %d SSH key(s) for %s", len(keys), login)
+	}
+	return nil
 }
 
 func (g *GithubSync) pullRequest() bool {
@@ -819,7 +947,7 @@ func (g *GithubSync) defaultInstanceTags() map[string]string {
 func (g *GithubSync) buildInstance() *Instance {
 	common := g.opts.Common
 	common.Tags = mergeStringMap(g.defaultInstanceTags(), common.Tags)
-	common.Admins = g.expandedAdmins()
+	common.Admins, common.AdminPublicKeys = g.expandedAdminsAndKeys()
 	instance := NewInstance(g.instanceName(), common, g.provider, g.logger)
 	instance.WithSubdomain(g.instanceSubdomain())
 	return instance
@@ -838,18 +966,20 @@ func mergeStringMap(base, extra map[string]string) map[string]string {
 
 func instanceToCommon(inst *Instance) CommonOptions {
 	return CommonOptions{
-		Admins:         inst.Admins,
-		CIDRs:          inst.CIDRs,
-		Registries:     inst.Registries,
-		ProxyTLS:       inst.ProxyTLS,
-		DNS:            inst.DNS,
-		Ports:          inst.Ports,
-		InstanceType:   inst.Size,
-		DefaultPort:    inst.DefaultPort,
-		Tags:           inst.Tags,
-		ComposeFiles:   inst.ComposeFiles,
-		ComposeOptions: inst.ComposeOptions,
-		PreScript:      inst.PreScript,
+		Admins:          inst.Admins,
+		AdminPublicKeys: inst.AdminPublicKeys,
+		Context:         inst.Context,
+		CIDRs:           inst.CIDRs,
+		Registries:      inst.Registries,
+		ProxyTLS:        inst.ProxyTLS,
+		DNS:             inst.DNS,
+		Ports:           inst.Ports,
+		InstanceType:    inst.Size,
+		DefaultPort:     inst.DefaultPort,
+		Tags:            inst.Tags,
+		ComposeFiles:    inst.ComposeFiles,
+		ComposeOptions:  inst.ComposeOptions,
+		PreScript:       inst.PreScript,
 	}
 }
 

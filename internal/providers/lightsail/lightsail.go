@@ -26,11 +26,13 @@ var sizeMap = map[string]string{
 
 type Provider struct {
 	client *ls.Client
+	ctx    context.Context
 	region string
 	logger *pullpreview.Logger
 }
 
 func New(ctx context.Context, region string, logger *pullpreview.Logger) (*Provider, error) {
+	ctx = pullpreview.EnsureContext(ctx)
 	if region == "" {
 		region = "us-east-1"
 	}
@@ -40,13 +42,14 @@ func New(ctx context.Context, region string, logger *pullpreview.Logger) (*Provi
 	}
 	return &Provider{
 		client: ls.NewFromConfig(cfg),
+		ctx:    ctx,
 		region: region,
 		logger: logger,
 	}, nil
 }
 
 func (p *Provider) Running(name string) (bool, error) {
-	resp, err := p.client.GetInstanceState(context.Background(), &ls.GetInstanceStateInput{InstanceName: aws.String(name)})
+	resp, err := p.client.GetInstanceState(p.ctx, &ls.GetInstanceStateInput{InstanceName: aws.String(name)})
 	if err != nil {
 		var nf *types.NotFoundException
 		if errors.As(err, &nf) {
@@ -58,7 +61,7 @@ func (p *Provider) Running(name string) (bool, error) {
 }
 
 func (p *Provider) Terminate(name string) error {
-	resp, err := p.client.DeleteInstance(context.Background(), &ls.DeleteInstanceInput{InstanceName: aws.String(name)})
+	resp, err := p.client.DeleteInstance(p.ctx, &ls.DeleteInstanceInput{InstanceName: aws.String(name)})
 	if err != nil {
 		return err
 	}
@@ -113,7 +116,7 @@ func (p *Provider) launchOrRestore(name string, opts pullpreview.LaunchOptions) 
 		if p.logger != nil {
 			p.logger.Infof("Found snapshot to restore from: %s", aws.ToString(snapshot.Name))
 		}
-		_, err := p.client.CreateInstancesFromSnapshot(context.Background(), &ls.CreateInstancesFromSnapshotInput{
+		_, err := p.client.CreateInstancesFromSnapshot(p.ctx, &ls.CreateInstancesFromSnapshotInput{
 			InstanceNames:        []string{name},
 			AvailabilityZone:     aws.String(zones[0]),
 			BundleId:             aws.String(bundleID),
@@ -124,7 +127,7 @@ func (p *Provider) launchOrRestore(name string, opts pullpreview.LaunchOptions) 
 		return err
 	}
 
-	_, err = p.client.CreateInstances(context.Background(), params)
+	_, err = p.client.CreateInstances(p.ctx, params)
 	return err
 }
 
@@ -140,7 +143,7 @@ func mergeTags(base, extra map[string]string) map[string]string {
 }
 
 func (p *Provider) waitUntilRunning(name string) error {
-	ok := pullpreview.WaitUntil(30, 5*time.Second, func() bool {
+	ok := pullpreview.WaitUntilContext(p.ctx, 30, 5*time.Second, func() bool {
 		running, err := p.Running(name)
 		if err != nil {
 			return false
@@ -186,7 +189,7 @@ func (p *Provider) setupFirewall(name string, cidrs, ports []string) error {
 			Cidrs:    useCIDRs,
 		})
 	}
-	_, err := p.client.PutInstancePublicPorts(context.Background(), &ls.PutInstancePublicPortsInput{
+	_, err := p.client.PutInstancePublicPorts(p.ctx, &ls.PutInstancePublicPortsInput{
 		InstanceName: aws.String(name),
 		PortInfos:    portInfos,
 	})
@@ -209,7 +212,7 @@ func mustAtoi(value string) int {
 }
 
 func (p *Provider) fetchAccessDetails(name string) (pullpreview.AccessDetails, error) {
-	resp, err := p.client.GetInstanceAccessDetails(context.Background(), &ls.GetInstanceAccessDetailsInput{
+	resp, err := p.client.GetInstanceAccessDetails(p.ctx, &ls.GetInstanceAccessDetailsInput{
 		InstanceName: aws.String(name),
 		Protocol:     types.InstanceAccessProtocolSsh,
 	})
@@ -228,7 +231,7 @@ func (p *Provider) fetchAccessDetails(name string) (pullpreview.AccessDetails, e
 }
 
 func (p *Provider) latestSnapshot(name string) *types.InstanceSnapshot {
-	resp, err := p.client.GetInstanceSnapshots(context.Background(), &ls.GetInstanceSnapshotsInput{})
+	resp, err := p.client.GetInstanceSnapshots(p.ctx, &ls.GetInstanceSnapshotsInput{})
 	if err != nil {
 		return nil
 	}
@@ -254,7 +257,7 @@ func (p *Provider) ListInstances(tags map[string]string) ([]pullpreview.Instance
 	result := []pullpreview.InstanceSummary{}
 	var token *string
 	for {
-		resp, err := p.client.GetInstances(context.Background(), &ls.GetInstancesInput{PageToken: token})
+		resp, err := p.client.GetInstances(p.ctx, &ls.GetInstancesInput{PageToken: token})
 		if err != nil {
 			return nil, err
 		}
@@ -321,7 +324,7 @@ func toLightsailTags(tags map[string]string) []types.Tag {
 }
 
 func (p *Provider) availabilityZones() ([]string, error) {
-	resp, err := p.client.GetRegions(context.Background(), &ls.GetRegionsInput{IncludeAvailabilityZones: aws.Bool(true)})
+	resp, err := p.client.GetRegions(p.ctx, &ls.GetRegionsInput{IncludeAvailabilityZones: aws.Bool(true)})
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +341,7 @@ func (p *Provider) availabilityZones() ([]string, error) {
 }
 
 func (p *Provider) blueprintID() string {
-	resp, err := p.client.GetBlueprints(context.Background(), &ls.GetBlueprintsInput{})
+	resp, err := p.client.GetBlueprints(p.ctx, &ls.GetBlueprintsInput{})
 	if err != nil {
 		return ""
 	}
@@ -361,7 +364,7 @@ func (p *Provider) bundleID(size string) (string, error) {
 			instanceType = strings.TrimSuffix(size, "_2_0")
 		}
 	}
-	resp, err := p.client.GetBundles(context.Background(), &ls.GetBundlesInput{})
+	resp, err := p.client.GetBundles(p.ctx, &ls.GetBundlesInput{})
 	if err != nil {
 		return "", err
 	}
