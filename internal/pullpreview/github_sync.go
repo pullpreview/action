@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -376,6 +377,7 @@ func (g *GithubSync) Sync() error {
 			_ = g.client.RemoveLabel(g.repo(), g.prNumber(), g.opts.Label)
 		}
 		_ = g.updateGitHubStatus(statusDestroyed, "")
+		g.writeStepSummary(statusDestroyed, action, "", nil)
 	case actionPRUp, actionPRPush, actionBranchPush:
 		_ = g.updateGitHubStatus(statusDeploying, "")
 		instance := g.buildInstance()
@@ -386,10 +388,12 @@ func (g *GithubSync) Sync() error {
 		}
 		if err != nil {
 			_ = g.updateGitHubStatus(statusError, "")
+			g.writeStepSummary(statusError, action, "", nil)
 			return err
 		}
 		if upInstance != nil {
 			_ = g.updateGitHubStatus(statusDeployed, upInstance.URL())
+			g.writeStepSummary(statusDeployed, action, upInstance.URL(), upInstance)
 		}
 	}
 	return nil
@@ -569,14 +573,102 @@ func (g *GithubSync) renderPRComment(status deploymentStatus, previewURL string)
 	if logs != "" {
 		logsLine = fmt.Sprintf("\n[View logs](%s)\n", logs)
 	}
+	title := fmt.Sprintf("### Deploying %s with [⚡](https://pullpreview.com) PullPreview", g.repoName())
 	return fmt.Sprintf(
-		"%s\n### PullPreview Deployment\n\n| Field | Value |\n|---|---|\n| Latest commit | `%s` |\n| Status | %s |\n| Preview URL | %s |\n%s",
+		"%s\n%s\n\n| Field | Value |\n|---|---|\n| Latest commit | `%s` |\n| Status | %s |\n| Preview URL | %s |\n%s",
 		g.prCommentMarker(),
+		title,
 		commit,
 		statusText,
 		preview,
 		logsLine,
 	)
+}
+
+func (g *GithubSync) deploymentEnvironmentURL() string {
+	server := strings.TrimSuffix(os.Getenv("GITHUB_SERVER_URL"), "/")
+	if server == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%s/%s/deployments/activity_log?environment=%s",
+		server,
+		g.repo(),
+		url.QueryEscape(g.instanceName()),
+	)
+}
+
+func (g *GithubSync) statusSummaryText(status deploymentStatus) string {
+	switch status {
+	case statusDeploying:
+		return "Deploying preview"
+	case statusDeployed:
+		return "Deploy successful"
+	case statusError:
+		return "Deploy failed"
+	case statusDestroying:
+		return "Destroying preview"
+	case statusDestroyed:
+		return "Preview destroyed"
+	default:
+		return "Status unknown"
+	}
+}
+
+func (g *GithubSync) renderStepSummary(status deploymentStatus, action actionType, previewURL string, inst *Instance) string {
+	commit := g.sha()
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+
+	var b strings.Builder
+	b.WriteString("## PullPreview Summary\n\n")
+	b.WriteString(fmt.Sprintf("- Repository: `%s`\n", g.repo()))
+	b.WriteString(fmt.Sprintf("- Branch: `%s`\n", g.branch()))
+	b.WriteString(fmt.Sprintf("- Commit: `%s`\n", commit))
+	b.WriteString(fmt.Sprintf("- Action: `%s`\n", action))
+	b.WriteString(fmt.Sprintf("- Status: `%s`\n", g.statusSummaryText(status)))
+
+	if strings.TrimSpace(previewURL) != "" {
+		b.WriteString(fmt.Sprintf("- Preview URL: [%s](%s)\n", previewURL, previewURL))
+	}
+	if deploymentURL := g.deploymentEnvironmentURL(); deploymentURL != "" {
+		b.WriteString(fmt.Sprintf("- Deployment: [%s](%s)\n", g.instanceName(), deploymentURL))
+	}
+	if logs := g.workflowRunURL(); logs != "" {
+		b.WriteString(fmt.Sprintf("- Logs: [%s](%s)\n", logs, logs))
+	}
+
+	if inst != nil && status == statusDeployed {
+		b.WriteString(fmt.Sprintf("- SSH Username: `%s`\n", inst.Username()))
+		b.WriteString(fmt.Sprintf("- SSH IP: `%s`\n", inst.PublicIP()))
+		b.WriteString(fmt.Sprintf("- SSH Command: `ssh %s`\n", inst.SSHAddress()))
+	}
+
+	b.WriteString("\nPowered by [PullPreview](https://pullpreview.com).\n")
+	return b.String()
+}
+
+func (g *GithubSync) writeStepSummary(status deploymentStatus, action actionType, previewURL string, inst *Instance) {
+	path := strings.TrimSpace(os.Getenv("GITHUB_STEP_SUMMARY"))
+	if path == "" {
+		return
+	}
+	content := g.renderStepSummary(status, action, previewURL, inst)
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		if g.logger != nil {
+			g.logger.Warnf("Unable to open GITHUB_STEP_SUMMARY file: %v", err)
+		}
+		return
+	}
+	defer f.Close()
+	if _, err := f.WriteString(content + "\n"); err != nil && g.logger != nil {
+		g.logger.Warnf("Unable to write GITHUB_STEP_SUMMARY: %v", err)
+	}
 }
 
 func (g *GithubSync) workflowRunURL() string {
