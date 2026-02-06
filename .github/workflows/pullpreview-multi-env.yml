@@ -18,7 +18,7 @@ jobs:
           label: pullpreview-multi-env
           admins: crohr,qbonnard
           app_path: ./examples/wordpress
-          instance_type: micro_2_0
+          instance_type: micro
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
@@ -36,7 +36,7 @@ jobs:
           label: pullpreview-multi-env
           admins: crohr,qbonnard
           app_path: ./examples/wordpress
-          instance_type: micro_2_0
+          instance_type: micro
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
