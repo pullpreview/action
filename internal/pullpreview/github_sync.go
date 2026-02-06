@@ -264,7 +264,7 @@ func (g *GithubSync) Sync() error {
 			"repo_slug": g.repoName(),
 		})
 		if g.logger != nil {
-			g.logger.Infof(lic.Message)
+			g.logger.Infof("%s", lic.Message)
 		}
 		if !lic.OK() {
 			return errors.New(lic.Message)

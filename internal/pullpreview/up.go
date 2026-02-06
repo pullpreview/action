@@ -112,7 +112,7 @@ func emitDeploymentHeartbeat(instance *Instance, logger *Logger) {
 		admins,
 	)
 	if logger != nil {
-		logger.Infof(line)
+		logger.Infof("%s", line)
 		return
 	}
 	fmt.Println(line)

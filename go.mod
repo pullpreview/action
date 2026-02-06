@@ -1,13 +1,13 @@
 module github.com/pullpreview/action
 
-go 1.23.8
+go 1.25.1
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
 	github.com/aws/aws-sdk-go-v2/service/lightsail v1.50.11
 	github.com/google/go-github/v60 v60.0.0
-	golang.org/x/oauth2 v0.29.0
+	golang.org/x/oauth2 v0.34.0
 )
 
 require (
@@ -24,5 +24,5 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6 // indirect
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
 )
