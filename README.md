@@ -5,10 +5,11 @@ A GitHub Action that starts live environments for your pull requests and branche
 [![pullpreview](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml/badge.svg)](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml)
 <a href="https://news.ycombinator.com/item?id=23221471"><img src="https://img.shields.io/badge/Hacker%20News-83-%23FF6600" alt="Hacker News"></a>
 
-## Breaking change (Go runtime)
+## Breaking change (v6, Go runtime)
 
 - GitHub Deployments/Environments integration has been removed.
 - `comment_pr` has been removed; PullPreview PR status comments are now always enabled.
+- Workflow references should be updated to `uses: pullpreview/action@v6`.
 
 ## Spin environments in one click
 
@@ -92,6 +93,39 @@ Preview environments that:
 
 &rarr; Please see the [wiki](https://github.com/pullpreview/action/wiki) for the full documentation.
 
+## Action Inputs (v6)
+
+All supported `with:` inputs from `action.yml`:
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `app_path` | `/github/workspace` | Path to your application containing Docker Compose files. |
+| `always_on` | `""` | Comma-separated branch names that should always be deployed. |
+| `dns` | `my.preview.run` | DNS suffix used for generated preview hostnames. |
+| `max_domain_length` | `62` | Maximum generated FQDN length (cannot exceed 62 for Let's Encrypt). |
+| `label` | `pullpreview` | Label that triggers preview deployments. |
+| `github_token` | `${{ github.token }}` | GitHub token used for labels/comments/collaborator/key API operations. |
+| `admins` | `@collaborators/push` | Comma-separated GitHub users whose SSH keys are installed on preview instances. |
+| `ports` | `80/tcp,443/tcp` | Firewall ports to expose publicly (SSH `22` is always open). |
+| `cidrs` | `0.0.0.0/0` | Allowed source CIDR ranges for exposed ports. |
+| `default_port` | `80` | Port used to build the preview URL output. |
+| `compose_files` | `docker-compose.yml` | Comma-separated Compose files passed to deploy. |
+| `compose_options` | `--build` | Additional options appended to `docker compose up`. |
+| `license` | `""` | PullPreview license key. |
+| `instance_type` | `small` | Lightsail instance bundle (`nano`, `micro`, `small`, etc.). |
+| `deployment_variant` | `""` | Optional short suffix to run multiple preview environments per PR (max 4 chars). |
+| `provider` | `lightsail` | Cloud provider (currently Lightsail). |
+| `registries` | `""` | Private registry credentials, e.g. `docker://user:password@ghcr.io`. |
+| `proxy_tls` | `""` | Automatic HTTPS forwarding with Caddy + Let's Encrypt (`service:port`, e.g. `web:80`). |
+| `pre_script` | `""` | Path to a shell script (relative to `app_path`) executed before compose deploy. |
+| `ttl` | `infinite` | Maximum deployment lifetime (e.g. `10h`, `5d`, `infinite`). |
+
+Notes:
+
+- `proxy_tls` forces URL/output/comment links to HTTPS on port `443`, injects a Caddy proxy service, and suppresses firewall exposure for port `80`.
+- `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
+- SSH key fetches are cached between runs in the action cache.
+
 ## Example
 
 Workflow file with the `master` branch always on:
@@ -115,8 +149,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: pullpreview/action@v5
+      - uses: actions/checkout@v5
+      - uses: pullpreview/action@v6
         with:
           # Those GitHub users will have SSH access to the servers
           admins: crohr,other-github-user

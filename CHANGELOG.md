@@ -5,6 +5,7 @@
 - Removed GitHub Deployments/Environments integration from the Go action runtime.
 - PullPreview now relies on workflow checks + PR comments as the deployment UX surface.
 - Removed `comment_pr` input and `--comment-pr` CLI flag; PR comment updates are always enabled.
+- Workflow references should now use `pullpreview/action@v6`.
 
 ## v5.8.0
 
