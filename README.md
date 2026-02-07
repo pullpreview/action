@@ -7,8 +7,7 @@ A GitHub Action that starts live environments for your pull requests and branche
 
 ## Breaking change (v6, Go runtime)
 
-- GitHub Deployments/Environments integration has been removed.
-- `comment_pr` has been removed; PullPreview PR status comments are now always enabled.
+- GitHub Deployments/Environments integration has been removed. Environment URLs are now displayed in a single PR comment.
 - Workflow references should be updated to `uses: pullpreview/action@v6`.
 
 ## Spin environments in one click
