@@ -1,10 +1,13 @@
 package pullpreview
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -18,6 +21,8 @@ type fakeGitHub struct {
 	issues            []*gh.Issue
 	collaborators     []*gh.User
 	removedLabels     []string
+	removedLabelPRs   []int
+	listIssueLabels   []string
 	comments          []*gh.IssueComment
 	createdComments   []string
 	updatedComments   []string
@@ -25,6 +30,7 @@ type fakeGitHub struct {
 }
 
 func (f *fakeGitHub) ListIssues(repo, label string) ([]*gh.Issue, error) {
+	f.listIssueLabels = append(f.listIssueLabels, label)
 	return f.issues, nil
 }
 
@@ -37,6 +43,7 @@ func (f *fakeGitHub) GetPullRequest(repo string, number int) (*gh.PullRequest, e
 
 func (f *fakeGitHub) RemoveLabel(repo string, number int, label string) error {
 	f.removedLabels = append(f.removedLabels, label)
+	f.removedLabelPRs = append(f.removedLabelPRs, number)
 	return nil
 }
 
@@ -101,6 +108,29 @@ func (f fakeProvider) ListInstances(tags map[string]string) ([]InstanceSummary, 
 }
 
 func (f fakeProvider) Username() string { return "ec2-user" }
+
+type scheduledCleanupProvider struct {
+	instances []InstanceSummary
+	lastTags  map[string]string
+}
+
+func (f *scheduledCleanupProvider) Launch(name string, opts LaunchOptions) (AccessDetails, error) {
+	return AccessDetails{}, nil
+}
+
+func (f *scheduledCleanupProvider) Terminate(name string) error { return nil }
+
+func (f *scheduledCleanupProvider) Running(name string) (bool, error) { return false, nil }
+
+func (f *scheduledCleanupProvider) ListInstances(tags map[string]string) ([]InstanceSummary, error) {
+	f.lastTags = map[string]string{}
+	for k, v := range tags {
+		f.lastTags[k] = v
+	}
+	return f.instances, nil
+}
+
+func (f *scheduledCleanupProvider) Username() string { return "ec2-user" }
 
 func loadFixtureEvent(t *testing.T, filename string) GitHubEvent {
 	t.Helper()
@@ -508,6 +538,135 @@ func TestRunGithubSyncFromEnvironmentRunsDownForBranchPushWithoutAlwaysOn(t *tes
 	}
 	if !downCalled {
 		t.Fatalf("expected down flow to be executed")
+	}
+}
+
+func TestClearDanglingDeploymentsDestroysInstancesNotLinkedToActivePROrAlwaysOnBranch(t *testing.T) {
+	client := &fakeGitHub{
+		issues: []*gh.Issue{
+			{
+				Number:           gh.Int(10),
+				State:            gh.String("open"),
+				PullRequestLinks: &gh.PullRequestLinks{},
+			},
+			{
+				Number:           gh.Int(11),
+				State:            gh.String("closed"),
+				PullRequestLinks: &gh.PullRequestLinks{},
+			},
+		},
+	}
+	provider := &scheduledCleanupProvider{
+		instances: []InstanceSummary{
+			{Name: "gh-1-pr-10", Tags: map[string]string{"pr_number": "10"}},
+			{Name: "gh-1-pr-11", Tags: map[string]string{"pr_number": "11"}},
+			{Name: "gh-1-branch-main", Tags: map[string]string{"pullpreview_branch": "main"}},
+			{Name: "gh-1-branch-feature-x", Tags: map[string]string{}}, // legacy branch instance without branch tag
+		},
+	}
+	destroyed := []string{}
+	originalRunDown := runDownFunc
+	defer func() { runDownFunc = originalRunDown }()
+	runDownFunc = func(opts DownOptions, provider Provider, logger *Logger) error {
+		destroyed = append(destroyed, opts.Name)
+		return nil
+	}
+	var logs bytes.Buffer
+	logger := NewLogger(LevelInfo)
+	logger.base = log.New(&logs, "", 0)
+
+	err := clearDanglingDeployments("org/repo", GithubSyncOptions{
+		Label:    "pullpreview-custom",
+		AlwaysOn: []string{"main"},
+	}, provider, client, logger)
+	if err != nil {
+		t.Fatalf("clearDanglingDeployments() error: %v", err)
+	}
+
+	sort.Strings(destroyed)
+	wantDestroyed := []string{"gh-1-branch-feature-x", "gh-1-pr-11"}
+	if strings.Join(destroyed, ",") != strings.Join(wantDestroyed, ",") {
+		t.Fatalf("unexpected destroyed instances: got=%v want=%v", destroyed, wantDestroyed)
+	}
+	if provider.lastTags["stack"] != StackName || provider.lastTags["org_name"] != "org" || provider.lastTags["repo_name"] != "repo" {
+		t.Fatalf("unexpected repo cleanup list tags: %#v", provider.lastTags)
+	}
+	if len(client.listIssueLabels) != 1 || client.listIssueLabels[0] != "pullpreview-custom" {
+		t.Fatalf("expected custom label lookup, got %v", client.listIssueLabels)
+	}
+	if len(client.removedLabelPRs) != 1 || client.removedLabelPRs[0] != 11 {
+		t.Fatalf("expected closed PR label cleanup for PR#11, got %v", client.removedLabelPRs)
+	}
+	logOutput := logs.String()
+	if !strings.Contains(logOutput, "Active instances: gh-1-branch-main, gh-1-pr-10") {
+		t.Fatalf("missing active instances report in logs: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "Dangling removed: gh-1-branch-feature-x, gh-1-pr-11") {
+		t.Fatalf("missing dangling removed report in logs: %s", logOutput)
+	}
+}
+
+func TestClearDanglingDeploymentsScopesCleanupByDeploymentVariant(t *testing.T) {
+	client := &fakeGitHub{}
+	provider := &scheduledCleanupProvider{
+		instances: []InstanceSummary{
+			{Name: "gh-1-env1-pr-10", Tags: map[string]string{"pr_number": "10", "pullpreview_variant": "env1"}},
+			{Name: "gh-1-env2-pr-20", Tags: map[string]string{"pr_number": "20", "pullpreview_variant": "env2"}},
+			{Name: "gh-1-env1-pr-30", Tags: map[string]string{}}, // legacy env1 instance without variant tag
+			{Name: "gh-1-env2-pr-40", Tags: map[string]string{}}, // legacy env2 instance without variant tag
+		},
+	}
+	destroyed := []string{}
+	originalRunDown := runDownFunc
+	defer func() { runDownFunc = originalRunDown }()
+	runDownFunc = func(opts DownOptions, provider Provider, logger *Logger) error {
+		destroyed = append(destroyed, opts.Name)
+		return nil
+	}
+
+	err := clearDanglingDeployments("org/repo", GithubSyncOptions{
+		Label:             "pullpreview",
+		DeploymentVariant: "env1",
+	}, provider, client, nil)
+	if err != nil {
+		t.Fatalf("clearDanglingDeployments() error: %v", err)
+	}
+
+	sort.Strings(destroyed)
+	wantDestroyed := []string{"gh-1-env1-pr-10", "gh-1-env1-pr-30"}
+	if strings.Join(destroyed, ",") != strings.Join(wantDestroyed, ",") {
+		t.Fatalf("unexpected destroyed instances for env1 cleanup: got=%v want=%v", destroyed, wantDestroyed)
+	}
+}
+
+func TestClearDanglingDeploymentsWithoutVariantSkipsVariantInstances(t *testing.T) {
+	client := &fakeGitHub{}
+	provider := &scheduledCleanupProvider{
+		instances: []InstanceSummary{
+			{Name: "gh-1-pr-10", Tags: map[string]string{"pr_number": "10"}},
+			{Name: "gh-1-env1-pr-20", Tags: map[string]string{"pr_number": "20", "pullpreview_variant": "env1"}},
+			{Name: "gh-1-env2-pr-30", Tags: map[string]string{}}, // legacy env2 instance without variant tag
+		},
+	}
+	destroyed := []string{}
+	originalRunDown := runDownFunc
+	defer func() { runDownFunc = originalRunDown }()
+	runDownFunc = func(opts DownOptions, provider Provider, logger *Logger) error {
+		destroyed = append(destroyed, opts.Name)
+		return nil
+	}
+
+	err := clearDanglingDeployments("org/repo", GithubSyncOptions{
+		Label: "pullpreview",
+	}, provider, client, nil)
+	if err != nil {
+		t.Fatalf("clearDanglingDeployments() error: %v", err)
+	}
+
+	sort.Strings(destroyed)
+	wantDestroyed := []string{"gh-1-pr-10"}
+	if strings.Join(destroyed, ",") != strings.Join(wantDestroyed, ",") {
+		t.Fatalf("unexpected destroyed instances for default cleanup: got=%v want=%v", destroyed, wantDestroyed)
 	}
 }
 

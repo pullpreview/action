@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -162,40 +163,251 @@ func clearDanglingDeployments(repo string, opts GithubSyncOptions, provider Prov
 	if ttl == "" {
 		ttl = "infinite"
 	}
+	instances, err := provider.ListInstances(repoCleanupTags(repo))
+	if err != nil {
+		return err
+	}
 	issues, err := client.ListIssues(repo, opts.Label)
 	if err != nil {
 		return err
 	}
+	activePRs := map[string]struct{}{}
 	for _, issue := range issues {
-		if issue.PullRequestLinks == nil {
+		if issue == nil || issue.PullRequestLinks == nil {
 			continue
 		}
-		pr, err := client.GetPullRequest(repo, issue.GetNumber())
-		if err != nil {
+		number := issue.GetNumber()
+		if number == 0 {
 			continue
 		}
-		fake := eventFromPR(pr)
-		if issue.GetState() == "closed" {
-			if logger != nil {
-				logger.Warnf("[clear_dangling_deployments] Found dangling %s label for PR#%d. Cleaning up...", opts.Label, pr.GetNumber())
+		prKey := fmt.Sprintf("%d", number)
+		if strings.EqualFold(issue.GetState(), "open") && !prExpired(issue.GetUpdatedAt().Time, ttl) {
+			activePRs[prKey] = struct{}{}
+			continue
+		}
+		if logger != nil {
+			if strings.EqualFold(issue.GetState(), "closed") {
+				logger.Warnf("[clear_dangling_deployments] Found dangling %s label for PR#%d. Cleaning up...", opts.Label, number)
+			} else {
+				logger.Warnf("[clear_dangling_deployments] Found %s label for expired PR#%d (%s). Cleaning up...", opts.Label, number, issue.GetUpdatedAt().String())
 			}
-		} else if prExpired(issue.GetUpdatedAt().Time, ttl) {
+		}
+		if err := client.RemoveLabel(repo, number, opts.Label); err != nil && logger != nil {
+			logger.Warnf("[clear_dangling_deployments] Unable to remove %s label for PR#%d: %v", opts.Label, number, err)
+		}
+	}
+	alwaysOn := map[string]struct{}{}
+	alwaysOnNormalized := map[string]struct{}{}
+	for _, branch := range uniqueStrings(opts.AlwaysOn) {
+		alwaysOn[branch] = struct{}{}
+		alwaysOnNormalized[NormalizeName(branch)] = struct{}{}
+	}
+	activeInstanceNames := []string{}
+	removedInstanceNames := []string{}
+	for _, inst := range instances {
+		if !instanceMatchesCleanupVariant(inst, opts.DeploymentVariant) {
+			continue
+		}
+		ref, ok := cleanupInstanceReference(inst)
+		if !ok {
 			if logger != nil {
-				logger.Warnf("[clear_dangling_deployments] Found %s label for expired PR#%d (%s). Cleaning up...", opts.Label, pr.GetNumber(), issue.GetUpdatedAt().String())
+				logger.Warnf("[clear_dangling_deployments] Unable to infer linkage for instance %s. Skipping.", inst.Name)
+			}
+			continue
+		}
+		dangling := false
+		detail := ""
+		if ref.PRNumber != "" {
+			if _, exists := activePRs[ref.PRNumber]; !exists {
+				dangling = true
+				detail = fmt.Sprintf("PR#%s not active/labeled", ref.PRNumber)
 			}
 		} else {
-			if logger != nil {
-				logger.Warnf("[clear_dangling_deployments] Found %s label for active PR#%d (%s). Not touching.", opts.Label, pr.GetNumber(), issue.GetUpdatedAt().String())
+			_, exact := alwaysOn[ref.Branch]
+			_, normalized := alwaysOnNormalized[ref.BranchNormalized]
+			if !exact && !normalized {
+				dangling = true
+				detail = fmt.Sprintf("branch %q not always_on", ref.Branch)
+			}
+		}
+		if !dangling {
+			activeInstanceNames = append(activeInstanceNames, inst.Name)
+			continue
+		}
+		if logger != nil {
+			logger.Warnf("[clear_dangling_deployments] Found dangling instance %s (%s). Destroying...", inst.Name, detail)
+		}
+		if runDownFunc != nil {
+			if err := runDownFunc(DownOptions{Name: inst.Name}, provider, logger); err != nil {
+				if logger != nil {
+					logger.Warnf("[clear_dangling_deployments] Unable to destroy %s: %v", inst.Name, err)
+				}
+			} else {
+				removedInstanceNames = append(removedInstanceNames, inst.Name)
 			}
 			continue
 		}
-		sync := &GithubSync{event: fake, appPath: opts.AppPath, opts: opts, client: client, provider: provider, logger: logger, runUp: runUpFunc, runDown: runDownFunc}
-		_ = sync.Sync()
+		if err := provider.Terminate(inst.Name); err != nil {
+			if logger != nil {
+				logger.Warnf("[clear_dangling_deployments] Unable to destroy %s: %v", inst.Name, err)
+			}
+		} else {
+			removedInstanceNames = append(removedInstanceNames, inst.Name)
+		}
 	}
 	if logger != nil {
+		logger.Infof("[clear_dangling_deployments] Active instances: %s", formatCleanupNames(activeInstanceNames))
+		logger.Infof("[clear_dangling_deployments] Dangling removed: %s", formatCleanupNames(removedInstanceNames))
 		logger.Infof("[clear_dangling_deployments] end")
 	}
 	return nil
+}
+
+func formatCleanupNames(names []string) string {
+	names = uniqueStrings(names)
+	if len(names) == 0 {
+		return "(none)"
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+func repoCleanupTags(repo string) map[string]string {
+	tags := map[string]string{
+		"stack": StackName,
+	}
+	parts := strings.SplitN(strings.TrimSpace(repo), "/", 2)
+	if len(parts) == 2 {
+		if org := strings.TrimSpace(parts[0]); org != "" {
+			tags["org_name"] = org
+		}
+		if name := strings.TrimSpace(parts[1]); name != "" {
+			tags["repo_name"] = name
+		}
+	}
+	return tags
+}
+
+type cleanupInstanceRef struct {
+	PRNumber         string
+	Branch           string
+	BranchNormalized string
+}
+
+func cleanupInstanceReference(inst InstanceSummary) (cleanupInstanceRef, bool) {
+	prNumber := normalizePRNumber(firstTagValue(inst.Tags, "pr_number"))
+	if prNumber != "" {
+		return cleanupInstanceRef{PRNumber: prNumber}, true
+	}
+	branch := firstTagValue(inst.Tags, "pullpreview_branch", "branch")
+	if branch != "" {
+		return cleanupInstanceRef{Branch: branch, BranchNormalized: NormalizeName(branch)}, true
+	}
+	parsed, ok := parsePullPreviewInstanceName(inst.Name)
+	if !ok {
+		return cleanupInstanceRef{}, false
+	}
+	if parsed.PRNumber != "" {
+		return cleanupInstanceRef{PRNumber: parsed.PRNumber}, true
+	}
+	if parsed.Branch != "" {
+		return cleanupInstanceRef{Branch: parsed.Branch, BranchNormalized: parsed.Branch}, true
+	}
+	return cleanupInstanceRef{}, false
+}
+
+func instanceMatchesCleanupVariant(inst InstanceSummary, expectedVariant string) bool {
+	expectedVariant = strings.TrimSpace(expectedVariant)
+	tagVariant := firstTagValue(inst.Tags, "pullpreview_variant", "deployment_variant")
+	if expectedVariant == "" {
+		if tagVariant != "" {
+			return false
+		}
+		parsed, ok := parsePullPreviewInstanceName(inst.Name)
+		return !ok || parsed.Variant == ""
+	}
+	if strings.EqualFold(tagVariant, expectedVariant) {
+		return true
+	}
+	if tagVariant != "" {
+		return false
+	}
+	parsed, ok := parsePullPreviewInstanceName(inst.Name)
+	return ok && strings.EqualFold(parsed.Variant, expectedVariant)
+}
+
+type parsedInstanceName struct {
+	Variant  string
+	PRNumber string
+	Branch   string
+}
+
+func parsePullPreviewInstanceName(name string) (parsedInstanceName, bool) {
+	parts := strings.Split(strings.TrimSpace(name), "-")
+	if len(parts) < 4 || parts[0] != "gh" || !isDigits(parts[1]) {
+		return parsedInstanceName{}, false
+	}
+	if parts[len(parts)-2] == "pr" {
+		prNumber := normalizePRNumber(parts[len(parts)-1])
+		if prNumber == "" {
+			return parsedInstanceName{}, false
+		}
+		variant := strings.Join(parts[2:len(parts)-2], "-")
+		if variant != "" && len(variant) > 4 {
+			return parsedInstanceName{}, false
+		}
+		return parsedInstanceName{Variant: variant, PRNumber: prNumber}, true
+	}
+	for i := 2; i < len(parts)-1; i++ {
+		if parts[i] != "branch" {
+			continue
+		}
+		variant := strings.Join(parts[2:i], "-")
+		if variant != "" && len(variant) > 4 {
+			continue
+		}
+		branch := strings.Join(parts[i+1:], "-")
+		if branch == "" {
+			continue
+		}
+		return parsedInstanceName{Variant: variant, Branch: branch}, true
+	}
+	return parsedInstanceName{}, false
+}
+
+func normalizePRNumber(value string) string {
+	value = strings.TrimSpace(value)
+	if !isDigits(value) {
+		return ""
+	}
+	number := mustParseInt(value)
+	if number <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", number)
+}
+
+func firstTagValue(tags map[string]string, keys ...string) string {
+	for _, key := range keys {
+		value := strings.TrimSpace(tags[key])
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func isDigits(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func mustParseInt(value string) int {
@@ -207,27 +419,6 @@ func mustParseInt(value string) int {
 		result = result*10 + int(r-'0')
 	}
 	return result
-}
-
-func eventFromPR(pr *gh.PullRequest) GitHubEvent {
-	owner := pr.Base.Repo.Owner
-	repository := GitHubRepo{ID: pr.Base.Repo.GetID(), Name: pr.Base.Repo.GetName(), Owner: GitHubOrg{Login: owner.GetLogin(), ID: owner.GetID(), Type: owner.GetType()}}
-	var org *GitHubOrg
-	if strings.EqualFold(owner.GetType(), "Organization") {
-		org = &GitHubOrg{Login: owner.GetLogin(), ID: owner.GetID(), Type: owner.GetType()}
-	}
-	labels := []GitHubLabel{}
-	for _, label := range pr.Labels {
-		labels = append(labels, GitHubLabel{Name: label.GetName()})
-	}
-	return GitHubEvent{
-		Action:       "closed",
-		PullRequest:  &GitHubPR{Number: pr.GetNumber(), Head: GitHubPRHead{SHA: pr.Head.GetSHA(), Ref: pr.Head.GetRef()}, Base: GitHubPRBase{Repo: repository}, Labels: labels},
-		Repository:   repository,
-		Organization: org,
-		Ref:          pr.Head.GetRef(),
-		Number:       pr.GetNumber(),
-	}
 }
 
 func (g *GithubSync) Sync() error {
@@ -901,14 +1092,23 @@ func (g *GithubSync) instanceSubdomain() string {
 
 func (g *GithubSync) defaultInstanceTags() map[string]string {
 	tags := map[string]string{
-		"repo_name": g.repoName(),
-		"repo_id":   fmt.Sprintf("%d", g.repoID()),
-		"org_name":  g.orgName(),
-		"org_id":    fmt.Sprintf("%d", g.orgID()),
-		"version":   Version,
+		"repo_name":        g.repoName(),
+		"repo_id":          fmt.Sprintf("%d", g.repoID()),
+		"org_name":         g.orgName(),
+		"org_id":           fmt.Sprintf("%d", g.orgID()),
+		"version":          Version,
+		"pullpreview_repo": g.repo(),
+		"pullpreview_kind": "branch",
+	}
+	if branch := g.branch(); branch != "" {
+		tags["pullpreview_branch"] = branch
+	}
+	if variant := g.deploymentVariant(); variant != "" {
+		tags["pullpreview_variant"] = variant
 	}
 	if g.prNumber() != 0 {
 		tags["pr_number"] = fmt.Sprintf("%d", g.prNumber())
+		tags["pullpreview_kind"] = "pr"
 	}
 	return tags
 }
