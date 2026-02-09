@@ -73,7 +73,7 @@ inputs:
     required: false
     default: ""
   pre_script:
-    description: "Path to a bash script to run on the instance, before calling docker compose, relative to the app_path"
+    description: "Path to a local bash script (relative to app_path) executed inline over SSH on the instance before docker compose"
     required: false
     default: ""
   ttl:

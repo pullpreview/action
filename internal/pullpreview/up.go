@@ -24,14 +24,8 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 	defer cloneCleanup()
 	appPath = clonePath
 
-	tarball, cleanup, err := instance.LocalTarballPath(appPath)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-
 	if logger != nil {
-		logger.Infof("Packaging app source from %s", appPath)
+		logger.Infof("Preparing deployment sources from %s", appPath)
 	}
 
 	if err := instance.LaunchAndWait(); err != nil {
@@ -46,7 +40,7 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 		return nil, err
 	}
 	if logger != nil {
-		logger.Infof("SSH keys and deploy scripts synced on instance")
+		logger.Infof("SSH keys synced on instance")
 	}
 
 	instructions := fmt.Sprintf("\nTo connect to the instance (authorized GitHub users: %s):\n  ssh %s\n", join(instance.Admins, ", "), instance.SSHAddress())
@@ -65,13 +59,7 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 		}
 	}()
 
-	if logger != nil {
-		if info, err := os.Stat(tarball); err == nil {
-			logger.Infof("Preparing to push app tarball (%.2fMB)", float64(info.Size())/1024.0/1024.0)
-		}
-	}
-
-	if err := instance.UpdateFromTarball(appPath, tarball); err != nil {
+	if err := instance.DeployApp(appPath); err != nil {
 		close(stop)
 		return nil, err
 	}

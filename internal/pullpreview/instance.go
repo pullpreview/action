@@ -375,8 +375,8 @@ func (i *Instance) EnsureRemoteAuthorizedKeysOwner() error {
 	return i.SSH(command, nil)
 }
 
-func (i *Instance) UpdateFromTarball(appPath, tarballPath string) error {
-	return i.DeployWithDockerContext(appPath, tarballPath)
+func (i *Instance) DeployApp(appPath string) error {
+	return i.DeployWithDockerContext(appPath)
 }
 
 func (i *Instance) SetupScripts() error {
@@ -386,14 +386,7 @@ func (i *Instance) SetupScripts() error {
 	if err := i.EnsureRemoteAuthorizedKeysOwner(); err != nil {
 		return err
 	}
-	if err := i.SetupPreScript(); err != nil {
-		return err
-	}
 	return nil
-}
-
-func (i *Instance) LocalTarballPath(appPath string) (string, func(), error) {
-	return CreateTarball(appPath)
 }
 
 func (i *Instance) CloneIfURL(appPath string) (string, func(), error) {

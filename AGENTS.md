@@ -30,11 +30,11 @@ Supported commands:
 - `pullpreview github-sync path/to/app`
 
 ## Deploy behavior (`up`)
-- Tars app directory (excluding `.git`).
 - Launches/restores Lightsail instance and waits for SSH.
-- Uploads authorized keys, update script, and pre-script.
+- Uploads authorized keys.
+- Renders compose config, rewrites relative bind mounts under `app_path` to `/app/...`, and syncs only those bind-mounted local paths to the server via `rsync`.
 - Deploys through Docker context to the remote engine.
-- Rewrites relative bind mounts under `app_path` so they resolve on the remote host.
+- Executes `pre_script` inline over SSH before `docker compose up` (script must be self-contained).
 - Optional automatic HTTPS proxying via Caddy + Let's Encrypt when `proxy_tls` is set.
   - Format: `service:port` (for example `web:80`).
   - Forces preview URL/output to HTTPS on port `443`.

@@ -32,80 +32,28 @@ type composePSContainer struct {
 	ExitCode int
 }
 
-func (i *Instance) DeployWithDockerContext(appPath, tarballPath string) error {
-	if err := i.syncRemoteAppFromTarball(tarballPath); err != nil {
-		return err
-	}
+type bindMountSync struct {
+	LocalSource  string
+	RemoteSource string
+	IsDir        bool
+}
+
+func (i *Instance) DeployWithDockerContext(appPath string) error {
 	pullpreviewEnv, err := i.writeRemoteEnvFile()
 	if err != nil {
 		return err
 	}
-	if err := i.runRemotePreScript(); err != nil {
+	composeConfig, syncPlan, err := i.composeConfigForRemoteContext(appPath, pullpreviewEnv)
+	if err != nil {
 		return err
 	}
-
-	composeConfig, err := i.composeConfigForRemoteContext(appPath, pullpreviewEnv)
-	if err != nil {
+	if err := i.syncRemoteBindMountSources(syncPlan); err != nil {
+		return err
+	}
+	if err := i.runRemotePreScript(appPath); err != nil {
 		return err
 	}
 	return i.runComposeOnRemoteContext(composeConfig)
-}
-
-func (i *Instance) syncRemoteAppFromTarball(tarballPath string) error {
-	remotePath := fmt.Sprintf("/tmp/app-%d.tar.gz", time.Now().UTC().Unix())
-	file, err := os.Open(tarballPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err := i.SCP(file, remotePath, "0644"); err != nil {
-		return err
-	}
-	user := i.Username()
-	command := fmt.Sprintf(
-		"sudo rm -rf %s && sudo mkdir -p %s && sudo chown -R %s.%s %s && tar xzf %s -C %s && rm -f %s",
-		remoteAppPath, remoteAppPath, user, user, remoteAppPath, remotePath, remoteAppPath, remotePath,
-	)
-	return i.SSH(command, nil)
-}
-
-func (i *Instance) runRemotePreScript() error {
-	command := fmt.Sprintf("cd %s && set -a && source %s && set +a && /tmp/pre_script.sh", remoteAppPath, remoteEnvPath)
-	return i.SSH(command, nil)
-}
-
-func (i *Instance) composeConfigForRemoteContext(appPath string, pullpreviewEnv map[string]string) ([]byte, error) {
-	absAppPath, err := filepath.Abs(appPath)
-	if err != nil {
-		return nil, err
-	}
-
-	args := []string{"compose"}
-	for _, composeFile := range i.ComposeFiles {
-		pathValue := composeFile
-		if !filepath.IsAbs(pathValue) {
-			pathValue = filepath.Join(absAppPath, composeFile)
-		}
-		args = append(args, "-f", pathValue)
-	}
-	args = append(args, "config", "--format", "json")
-
-	cmd := exec.CommandContext(i.Context, "docker", args...)
-	cmd.Dir = absAppPath
-	cmd.Env = mergeEnvironment(os.Environ(), pullpreviewEnv)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("unable to render compose config: %w (%s)", err, strings.TrimSpace(stderr.String()))
-	}
-
-	rewritten, err := rewriteRelativeBindSources(stdout.Bytes(), absAppPath, remoteAppPath)
-	if err != nil {
-		return nil, err
-	}
-	return applyProxyTLS(rewritten, i.ProxyTLS, i.PublicDNS(), i.Logger)
 }
 
 func (i *Instance) writeRemoteEnvFile() (map[string]string, error) {
@@ -135,6 +83,58 @@ func (i *Instance) writeRemoteEnvFile() (map[string]string, error) {
 		return nil, err
 	}
 	return envValues, nil
+}
+
+func (i *Instance) runRemotePreScript(appPath string) error {
+	script, err := i.inlinePreScript(appPath)
+	if err != nil {
+		return err
+	}
+	command := fmt.Sprintf("cd %s && bash -se", remoteAppPath)
+	return i.SSH(command, bytes.NewBufferString(script))
+}
+
+func (i *Instance) composeConfigForRemoteContext(appPath string, pullpreviewEnv map[string]string) ([]byte, []bindMountSync, error) {
+	absAppPath, err := filepath.Abs(appPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	args := []string{"compose"}
+	for _, composeFile := range i.ComposeFiles {
+		pathValue := composeFile
+		if !filepath.IsAbs(pathValue) {
+			pathValue = filepath.Join(absAppPath, composeFile)
+		}
+		args = append(args, "-f", pathValue)
+	}
+	args = append(args, "config", "--format", "json")
+
+	cmd := exec.CommandContext(i.Context, "docker", args...)
+	cmd.Dir = absAppPath
+	cmd.Env = mergeEnvironment(os.Environ(), pullpreviewEnv)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, nil, fmt.Errorf("unable to render compose config: %w (%s)", err, strings.TrimSpace(stderr.String()))
+	}
+
+	syncPlan, err := collectBindMountSyncs(stdout.Bytes(), absAppPath, remoteAppPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rewritten, err := rewriteRelativeBindSources(stdout.Bytes(), absAppPath, remoteAppPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	finalConfig, err := applyProxyTLS(rewritten, i.ProxyTLS, i.PublicDNS(), i.Logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	return finalConfig, syncPlan, nil
 }
 
 func (i *Instance) pullpreviewEnvValues(firstRun string) map[string]string {
@@ -168,6 +168,227 @@ func mergeEnvironment(base []string, overrides map[string]string) []string {
 		result = append(result, pair)
 	}
 	return result
+}
+
+func collectBindMountSyncs(composeConfigJSON []byte, absAppPath, remoteRoot string) ([]bindMountSync, error) {
+	var config map[string]any
+	if err := json.Unmarshal(composeConfigJSON, &config); err != nil {
+		return nil, fmt.Errorf("unable to parse compose config for bind mount sync: %w", err)
+	}
+
+	rawServices, ok := config["services"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+
+	seen := map[string]struct{}{}
+	syncs := []bindMountSync{}
+	for serviceName, rawService := range rawServices {
+		service, ok := rawService.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawVolumes, ok := service["volumes"].([]any)
+		if !ok {
+			continue
+		}
+
+		for _, rawVolume := range rawVolumes {
+			volume, ok := rawVolume.(map[string]any)
+			if !ok {
+				continue
+			}
+			typeValue, _ := volume["type"].(string)
+			if strings.ToLower(typeValue) != "bind" {
+				continue
+			}
+			source, _ := volume["source"].(string)
+			if strings.TrimSpace(source) == "" {
+				continue
+			}
+
+			localSource := source
+			if !filepath.IsAbs(localSource) {
+				localSource = filepath.Join(absAppPath, localSource)
+			}
+			localSource = filepath.Clean(localSource)
+
+			remoteSource, err := remoteBindSource(localSource, absAppPath, remoteRoot)
+			if err != nil {
+				return nil, fmt.Errorf("service %s bind mount %q: %w", serviceName, source, err)
+			}
+
+			info, err := os.Stat(localSource)
+			if err != nil {
+				return nil, fmt.Errorf("service %s bind mount %q: %w", serviceName, source, err)
+			}
+
+			key := localSource + "=>" + remoteSource
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			syncs = append(syncs, bindMountSync{
+				LocalSource:  localSource,
+				RemoteSource: remoteSource,
+				IsDir:        info.IsDir(),
+			})
+		}
+	}
+
+	sort.Slice(syncs, func(i, j int) bool {
+		if syncs[i].RemoteSource == syncs[j].RemoteSource {
+			return syncs[i].LocalSource < syncs[j].LocalSource
+		}
+		return syncs[i].RemoteSource < syncs[j].RemoteSource
+	})
+	return syncs, nil
+}
+
+func (i *Instance) syncRemoteBindMountSources(syncPlan []bindMountSync) error {
+	if len(syncPlan) == 0 {
+		if i.Logger != nil {
+			i.Logger.Infof("No bind mounts detected in compose config; skipping source sync")
+		}
+		return nil
+	}
+	if i.Logger != nil {
+		i.Logger.Infof("Syncing %d bind mount source path(s) to remote host", len(syncPlan))
+	}
+	if err := i.ensureRemoteBindMountTargets(syncPlan); err != nil {
+		return err
+	}
+	for _, entry := range syncPlan {
+		if i.Logger != nil {
+			i.Logger.Infof("Rsync bind mount local=%s remote=%s", entry.LocalSource, entry.RemoteSource)
+		}
+		if err := i.rsyncBindMount(entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (i *Instance) ensureRemoteBindMountTargets(syncPlan []bindMountSync) error {
+	user := i.Username()
+	remoteDirs := map[string]struct{}{
+		remoteAppPath: {},
+	}
+	for _, entry := range syncPlan {
+		if entry.IsDir {
+			remoteDirs[entry.RemoteSource] = struct{}{}
+			continue
+		}
+		remoteDirs[path.Dir(entry.RemoteSource)] = struct{}{}
+	}
+	ordered := make([]string, 0, len(remoteDirs))
+	for dir := range remoteDirs {
+		ordered = append(ordered, dir)
+	}
+	sort.Strings(ordered)
+	quoted := make([]string, 0, len(ordered))
+	for _, dir := range ordered {
+		quoted = append(quoted, shellQuote(dir))
+	}
+	command := fmt.Sprintf(
+		"sudo mkdir -p %s && sudo chown %s.%s %s",
+		strings.Join(quoted, " "),
+		user,
+		user,
+		strings.Join(quoted, " "),
+	)
+	return i.SSH(command, nil)
+}
+
+func (i *Instance) rsyncBindMount(entry bindMountSync) error {
+	keyFile, certFile, err := i.writeTempKeys()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(keyFile)
+		if certFile != "" {
+			_ = os.Remove(certFile)
+		}
+	}()
+
+	sshArgs := []string{
+		"ssh",
+		"-o", "ServerAliveInterval=15",
+		"-o", "IdentitiesOnly=yes",
+		"-i", keyFile,
+	}
+	if certFile != "" {
+		sshArgs = append(sshArgs, "-o", "CertificateFile="+certFile)
+	}
+	sshArgs = append(sshArgs, i.SSHOptions()...)
+
+	source := entry.LocalSource
+	remote := fmt.Sprintf("%s:%s", i.SSHAddress(), entry.RemoteSource)
+	if entry.IsDir {
+		source = ensureTrailingSlash(source)
+		remote += "/"
+	}
+
+	cmd := exec.CommandContext(i.Context, "rsync",
+		"-az",
+		"--delete",
+		"--links",
+		"--omit-dir-times",
+		"--no-perms",
+		"--no-owner",
+		"--no-group",
+		"-e", strings.Join(sshArgs, " "),
+		source,
+		remote,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := i.Runner.Run(cmd); err != nil {
+		return fmt.Errorf("rsync %s -> %s failed: %w", entry.LocalSource, entry.RemoteSource, err)
+	}
+	return nil
+}
+
+func ensureTrailingSlash(value string) string {
+	if strings.HasSuffix(value, string(filepath.Separator)) {
+		return value
+	}
+	return value + string(filepath.Separator)
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func (i *Instance) inlinePreScript(appPath string) (string, error) {
+	lines := []string{
+		"set -a",
+		fmt.Sprintf("source %s", remoteEnvPath),
+		"set +a",
+	}
+	for _, registry := range ParseRegistryCredentials(i.Registries, i.Logger) {
+		lines = append(lines,
+			fmt.Sprintf("echo \"Logging into %s...\"", registry.Host),
+			fmt.Sprintf("echo \"%s\" | docker login \"%s\" -u \"%s\" --password-stdin", registry.Password, registry.Host, registry.Username),
+		)
+	}
+	if strings.TrimSpace(i.PreScript) == "" {
+		return strings.Join(lines, "\n") + "\n", nil
+	}
+
+	pathValue := i.PreScript
+	if !filepath.IsAbs(pathValue) {
+		pathValue = filepath.Join(appPath, pathValue)
+	}
+	content, err := os.ReadFile(pathValue)
+	if err != nil {
+		return "", fmt.Errorf("unable to read pre_script at %s: %w", i.PreScript, err)
+	}
+
+	lines = append(lines, fmt.Sprintf("echo \"Running pre_script %s inline over SSH...\"", i.PreScript))
+	lines = append(lines, string(content))
+	return strings.Join(lines, "\n") + "\n", nil
 }
 
 func rewriteRelativeBindSources(composeConfigJSON []byte, absAppPath, remoteRoot string) ([]byte, error) {

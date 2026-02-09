@@ -3,6 +3,7 @@ package pullpreview
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -136,6 +137,110 @@ func TestMergeEnvironmentOverridesAndAdds(t *testing.T) {
 	}
 	if lookup["PATH"] != "/usr/bin" {
 		t.Fatalf("expected unrelated env vars to remain untouched")
+	}
+}
+
+func TestCollectBindMountSyncsIncludesFilesAndDirectories(t *testing.T) {
+	appPath := t.TempDir()
+	dumpsPath := filepath.Join(appPath, "dumps")
+	if err := os.MkdirAll(dumpsPath, 0755); err != nil {
+		t.Fatalf("mkdir dumps: %v", err)
+	}
+	caddyPath := filepath.Join(appPath, "Caddyfile")
+	if err := os.WriteFile(caddyPath, []byte("localhost"), 0644); err != nil {
+		t.Fatalf("write caddyfile: %v", err)
+	}
+
+	input := map[string]any{
+		"services": map[string]any{
+			"proxy": map[string]any{
+				"volumes": []any{
+					map[string]any{
+						"type":   "bind",
+						"source": dumpsPath,
+						"target": "/dumps",
+					},
+					map[string]any{
+						"type":   "bind",
+						"source": caddyPath,
+						"target": "/etc/caddy/Caddyfile",
+					},
+				},
+			},
+		},
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	syncs, err := collectBindMountSyncs(raw, appPath, "/app")
+	if err != nil {
+		t.Fatalf("collectBindMountSyncs() error: %v", err)
+	}
+	if len(syncs) != 2 {
+		t.Fatalf("expected 2 sync entries, got %d", len(syncs))
+	}
+
+	if syncs[0].RemoteSource != "/app/Caddyfile" || syncs[0].IsDir {
+		t.Fatalf("unexpected first sync entry: %#v", syncs[0])
+	}
+	if syncs[1].RemoteSource != "/app/dumps" || !syncs[1].IsDir {
+		t.Fatalf("unexpected second sync entry: %#v", syncs[1])
+	}
+}
+
+func TestCollectBindMountSyncsFailsOnMissingSource(t *testing.T) {
+	appPath := t.TempDir()
+	input := map[string]any{
+		"services": map[string]any{
+			"proxy": map[string]any{
+				"volumes": []any{
+					map[string]any{
+						"type":   "bind",
+						"source": filepath.Join(appPath, "does-not-exist"),
+						"target": "/missing",
+					},
+				},
+			},
+		},
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	_, err = collectBindMountSyncs(raw, appPath, "/app")
+	if err == nil {
+		t.Fatalf("expected missing-source error")
+	}
+	if !strings.Contains(err.Error(), "does-not-exist") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInlinePreScriptLoadsLocalScriptContent(t *testing.T) {
+	appPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(appPath, "scripts"), 0755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	scriptPath := filepath.Join(appPath, "scripts", "pre.sh")
+	if err := os.WriteFile(scriptPath, []byte("echo hello from pre-script\n"), 0755); err != nil {
+		t.Fatalf("write pre script: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{PreScript: "scripts/pre.sh"}, outputTestProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "ec2-user"}
+
+	inline, err := inst.inlinePreScript(appPath)
+	if err != nil {
+		t.Fatalf("inlinePreScript() error: %v", err)
+	}
+	if !strings.Contains(inline, "source /etc/pullpreview/env") {
+		t.Fatalf("expected inline script to source pullpreview env, got %q", inline)
+	}
+	if !strings.Contains(inline, "echo hello from pre-script") {
+		t.Fatalf("expected inline script to contain pre-script body, got %q", inline)
 	}
 }
 

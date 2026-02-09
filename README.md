@@ -116,7 +116,7 @@ All supported `with:` inputs from `action.yml`:
 | `provider` | `lightsail` | Cloud provider (currently Lightsail). |
 | `registries` | `""` | Private registry credentials, e.g. `docker://user:password@ghcr.io`. |
 | `proxy_tls` | `""` | Automatic HTTPS forwarding with Caddy + Let's Encrypt (`service:port`, e.g. `web:80`). |
-| `pre_script` | `""` | Path to a shell script (relative to `app_path`) executed before compose deploy. |
+| `pre_script` | `""` | Path to a local shell script (relative to `app_path`) executed inline over SSH before compose deploy (should be self-contained). |
 | `ttl` | `infinite` | Maximum deployment lifetime (e.g. `10h`, `5d`, `infinite`). |
 
 Notes:
