@@ -98,7 +98,7 @@ All supported `with:` inputs from `action.yml`:
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `app_path` | `/github/workspace` | Path to your application containing Docker Compose files. |
+| `app_path` | `.` | Path to your application containing Docker Compose files (relative to `${{ github.workspace }}`). |
 | `always_on` | `""` | Comma-separated branch names that should always be deployed. |
 | `dns` | `my.preview.run` | DNS suffix used for generated preview hostnames. |
 | `max_domain_length` | `62` | Maximum generated FQDN length (cannot exceed 62 for Let's Encrypt). |

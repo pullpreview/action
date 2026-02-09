@@ -7,7 +7,7 @@ branding:
 inputs:
   app_path:
     description: "The path to your application containing a docker-compose file"
-    default: "/github/workspace"
+    default: "."
     required: false
   always_on:
     description: "List of always-on branches, irrespective of whether they correspond to an open Pull Request, comma-separated"
@@ -138,7 +138,13 @@ runs:
         fi
         chmod +x "${binary}"
 
-        "${binary}" github-sync "${{ inputs.app_path }}" \
+        app_path="${{ inputs.app_path }}"
+        # Backward compatibility for Docker-era defaults; composite actions run in $GITHUB_WORKSPACE.
+        if [ -z "${app_path}" ] || [ "${app_path}" = "/github/workspace" ]; then
+          app_path="${GITHUB_WORKSPACE}"
+        fi
+
+        "${binary}" github-sync "${app_path}" \
           --admins "${{ inputs.admins }}" \
           --cidrs "${{ inputs.cidrs }}" \
           --compose-files "${{ inputs.compose_files }}" \
