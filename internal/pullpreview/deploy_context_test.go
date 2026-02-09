@@ -100,3 +100,40 @@ func TestLoginRegistriesOnRunnerNoop(t *testing.T) {
 		t.Fatalf("expected empty registry list to be a no-op: %v", err)
 	}
 }
+
+func TestMergeEnvironmentOverridesAndAdds(t *testing.T) {
+	base := []string{
+		"PATH=/usr/bin",
+		"PULLPREVIEW_PUBLIC_DNS=old.preview.run",
+	}
+	merged := mergeEnvironment(base, map[string]string{
+		"PULLPREVIEW_PUBLIC_DNS": "new.preview.run",
+		"PULLPREVIEW_FIRST_RUN":  "true",
+	})
+
+	dnsCount := 0
+	lookup := map[string]string{}
+	for _, entry := range merged {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		lookup[parts[0]] = parts[1]
+		if parts[0] == "PULLPREVIEW_PUBLIC_DNS" {
+			dnsCount++
+		}
+	}
+
+	if dnsCount != 1 {
+		t.Fatalf("expected exactly one PULLPREVIEW_PUBLIC_DNS entry, got %d", dnsCount)
+	}
+	if lookup["PULLPREVIEW_PUBLIC_DNS"] != "new.preview.run" {
+		t.Fatalf("expected DNS override to be applied, got %q", lookup["PULLPREVIEW_PUBLIC_DNS"])
+	}
+	if lookup["PULLPREVIEW_FIRST_RUN"] != "true" {
+		t.Fatalf("expected PULLPREVIEW_FIRST_RUN to be added")
+	}
+	if lookup["PATH"] != "/usr/bin" {
+		t.Fatalf("expected unrelated env vars to remain untouched")
+	}
+}

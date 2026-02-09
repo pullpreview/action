@@ -113,6 +113,10 @@ func defaultMap(value map[string]string) map[string]string {
 }
 
 func (i *Instance) LaunchAndWait() error {
+	if i.Logger != nil {
+		i.Logger.Infof("Creating or restoring instance name=%s size=%s", i.Name, i.Size)
+	}
+
 	userData := UserData{AppPath: remoteAppPath, SSHPublicKeys: i.SSHPublicKeys(), Username: i.Username()}
 	access, err := i.Provider.Launch(i.Name, LaunchOptions{
 		Size:     i.Size,
@@ -126,7 +130,12 @@ func (i *Instance) LaunchAndWait() error {
 	}
 	i.Access = access
 	if i.Logger != nil {
-		i.Logger.Infof("Instance is running public_ip=%s", i.PublicIP())
+		i.Logger.Infof(
+			"Instance created name=%s public_ip=%s username=%s",
+			i.Name,
+			i.PublicIP(),
+			i.Username(),
+		)
 	}
 	if ok := WaitUntilContext(i.Context, 30, 5*time.Second, func() bool {
 		if i.Logger != nil {

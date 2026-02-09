@@ -22,14 +22,15 @@ func (i *Instance) DeployWithDockerContext(appPath, tarballPath string) error {
 	if err := i.syncRemoteAppFromTarball(tarballPath); err != nil {
 		return err
 	}
-	if err := i.writeRemoteEnvFile(); err != nil {
+	pullpreviewEnv, err := i.writeRemoteEnvFile()
+	if err != nil {
 		return err
 	}
 	if err := i.runRemotePreScript(); err != nil {
 		return err
 	}
 
-	composeConfig, err := i.composeConfigForRemoteContext(appPath)
+	composeConfig, err := i.composeConfigForRemoteContext(appPath, pullpreviewEnv)
 	if err != nil {
 		return err
 	}
@@ -54,29 +55,33 @@ func (i *Instance) syncRemoteAppFromTarball(tarballPath string) error {
 	return i.SSH(command, nil)
 }
 
-func (i *Instance) writeRemoteEnvFile() error {
+func (i *Instance) writeRemoteEnvFile() (map[string]string, error) {
 	firstRun := "true"
 	if i.SSH(fmt.Sprintf("test -f %s", remoteEnvPath), nil) == nil {
 		firstRun = "false"
 	}
+	envValues := i.pullpreviewEnvValues(firstRun)
 
 	content := strings.Join([]string{
-		fmt.Sprintf("PULLPREVIEW_PUBLIC_DNS=%s", i.PublicDNS()),
-		fmt.Sprintf("PULLPREVIEW_PUBLIC_IP=%s", i.PublicIP()),
-		fmt.Sprintf("PULLPREVIEW_URL=%s", i.URL()),
-		fmt.Sprintf("PULLPREVIEW_FIRST_RUN=%s", firstRun),
-		fmt.Sprintf("COMPOSE_FILE=%s", strings.Join(i.ComposeFiles, ":")),
+		fmt.Sprintf("PULLPREVIEW_PUBLIC_DNS=%s", envValues["PULLPREVIEW_PUBLIC_DNS"]),
+		fmt.Sprintf("PULLPREVIEW_PUBLIC_IP=%s", envValues["PULLPREVIEW_PUBLIC_IP"]),
+		fmt.Sprintf("PULLPREVIEW_URL=%s", envValues["PULLPREVIEW_URL"]),
+		fmt.Sprintf("PULLPREVIEW_FIRST_RUN=%s", envValues["PULLPREVIEW_FIRST_RUN"]),
+		fmt.Sprintf("COMPOSE_FILE=%s", envValues["COMPOSE_FILE"]),
 		"",
 	}, "\n")
 	if err := i.SCP(bytes.NewBufferString(content), "/tmp/pullpreview_env", "0644"); err != nil {
-		return err
+		return nil, err
 	}
 	user := i.Username()
 	command := fmt.Sprintf(
 		"sudo mkdir -p /etc/pullpreview && sudo mv /tmp/pullpreview_env %s && sudo chown %s.%s %s && sudo chmod 0644 %s",
 		remoteEnvPath, user, user, remoteEnvPath, remoteEnvPath,
 	)
-	return i.SSH(command, nil)
+	if err := i.SSH(command, nil); err != nil {
+		return nil, err
+	}
+	return envValues, nil
 }
 
 func (i *Instance) runRemotePreScript() error {
@@ -84,7 +89,7 @@ func (i *Instance) runRemotePreScript() error {
 	return i.SSH(command, nil)
 }
 
-func (i *Instance) composeConfigForRemoteContext(appPath string) ([]byte, error) {
+func (i *Instance) composeConfigForRemoteContext(appPath string, pullpreviewEnv map[string]string) ([]byte, error) {
 	absAppPath, err := filepath.Abs(appPath)
 	if err != nil {
 		return nil, err
@@ -102,6 +107,7 @@ func (i *Instance) composeConfigForRemoteContext(appPath string) ([]byte, error)
 
 	cmd := exec.CommandContext(i.Context, "docker", args...)
 	cmd.Dir = absAppPath
+	cmd.Env = mergeEnvironment(os.Environ(), pullpreviewEnv)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -115,6 +121,39 @@ func (i *Instance) composeConfigForRemoteContext(appPath string) ([]byte, error)
 		return nil, err
 	}
 	return applyProxyTLS(rewritten, i.ProxyTLS, i.PublicDNS(), i.Logger)
+}
+
+func (i *Instance) pullpreviewEnvValues(firstRun string) map[string]string {
+	return map[string]string{
+		"PULLPREVIEW_PUBLIC_DNS": i.PublicDNS(),
+		"PULLPREVIEW_PUBLIC_IP":  i.PublicIP(),
+		"PULLPREVIEW_URL":        i.URL(),
+		"PULLPREVIEW_FIRST_RUN":  firstRun,
+		"COMPOSE_FILE":           strings.Join(i.ComposeFiles, ":"),
+	}
+}
+
+func mergeEnvironment(base []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return append([]string{}, base...)
+	}
+	result := append([]string{}, base...)
+	keyIndex := map[string]int{}
+	for i, entry := range result {
+		if idx := strings.Index(entry, "="); idx > 0 {
+			keyIndex[entry[:idx]] = i
+		}
+	}
+	for key, value := range overrides {
+		pair := fmt.Sprintf("%s=%s", key, value)
+		if idx, ok := keyIndex[key]; ok {
+			result[idx] = pair
+			continue
+		}
+		keyIndex[key] = len(result)
+		result = append(result, pair)
+	}
+	return result
 }
 
 func rewriteRelativeBindSources(composeConfigJSON []byte, absAppPath, remoteRoot string) ([]byte, error) {

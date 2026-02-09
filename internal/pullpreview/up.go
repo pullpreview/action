@@ -31,7 +31,7 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 	defer cleanup()
 
 	if logger != nil {
-		logger.Infof("Taring up repository at %s...", appPath)
+		logger.Infof("Packaging app source from %s", appPath)
 	}
 
 	if err := instance.LaunchAndWait(); err != nil {
