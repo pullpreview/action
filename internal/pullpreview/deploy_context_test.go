@@ -266,18 +266,22 @@ func TestParseComposePSOutputJSON(t *testing.T) {
 func TestSelectFailedContainers(t *testing.T) {
 	containers := []composePSContainer{
 		{Service: "web", Name: "app-web-1", State: "exited", ExitCode: 1},
+		{Service: "web", Name: "app-web-2", State: "exited", ExitCode: 2},
 		{Service: "db", Name: "app-db-1", State: "running", Health: "unhealthy"},
 		{Service: "cache", Name: "app-cache-1", State: "running", ExitCode: 0},
 	}
 	failed := selectFailedContainers(containers)
-	if len(failed) != 2 {
-		t.Fatalf("expected 2 failed containers, got %d", len(failed))
+	if len(failed) != 3 {
+		t.Fatalf("expected 3 failed containers, got %d", len(failed))
 	}
 	if failed[0].Service != "web" {
 		t.Fatalf("expected web to be first failed container, got %q", failed[0].Service)
 	}
-	if failed[1].Service != "db" {
-		t.Fatalf("expected db to be second failed container, got %q", failed[1].Service)
+	if failed[1].Name != "app-web-2" {
+		t.Fatalf("expected second failed container to be app-web-2, got %q", failed[1].Name)
+	}
+	if failed[2].Service != "db" {
+		t.Fatalf("expected db to be third failed container, got %q", failed[2].Service)
 	}
 }
 
@@ -285,54 +289,49 @@ func TestRenderComposeFailureReportIncludesTroubleshooting(t *testing.T) {
 	inst := NewInstance("demo", CommonOptions{DNS: "preview.run", Admins: []string{"alice", "bob"}}, outputTestProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "ec2-user"}
 
+	containers := []composePSContainer{
+		{Service: "web", Name: "app-web-1", State: "exited", ExitCode: 1},
+		{Service: "db", Name: "app-db-1", State: "running", Health: "healthy", ExitCode: 0},
+	}
 	failed := []composePSContainer{
 		{Service: "web", Name: "app-web-1", State: "exited", ExitCode: 1},
-	}
-	serviceLogs := map[string]string{
-		"web": "web failed to boot",
 	}
 	report := renderComposeFailureReport(
 		inst,
 		[]string{"up", "--wait", "--remove-orphans", "-d"},
 		errors.New("docker compose up failed"),
+		containers,
 		failed,
 		"NAME STATUS",
-		serviceLogs,
 		[]string{"sample diagnostic note"},
 	)
 
 	required := []string{
 		"## PullPreview Troubleshooting Report",
 		"ssh ec2-user@1.2.3.4",
-		"docker compose ps -a",
-		"docker compose logs --tail 200 web",
+		"docker ps -a",
+		"Container Health Overview",
+		"Total containers: `2`",
+		"Failed: `1`",
 		"`web` (`app-web-1`) state=`exited`",
 		"sample diagnostic note",
-		"web failed to boot",
+		"status=`failed`",
 	}
 	for _, needle := range required {
 		if !strings.Contains(report, needle) {
 			t.Fatalf("expected report to contain %q, got:\n%s", needle, report)
 		}
 	}
+	if strings.Contains(report, "Last 20 log lines") {
+		t.Fatalf("did not expect report to include container logs, got:\n%s", report)
+	}
 }
 
-func TestOrderedServiceLogKeysIncludesFallbackServices(t *testing.T) {
-	keys := orderedServiceLogKeys(
-		[]composePSContainer{{Service: "web"}},
-		map[string]string{
-			"web":   "one",
-			"db":    "two",
-			"cache": "three",
-		},
-	)
-	if len(keys) != 3 {
-		t.Fatalf("expected 3 services, got %d", len(keys))
+func TestFailedContainerLogKeyPrefersContainerName(t *testing.T) {
+	if got := failedContainerLogKey(composePSContainer{Name: "app-web-1", Service: "web"}); got != "app-web-1" {
+		t.Fatalf("expected container name key, got %q", got)
 	}
-	if keys[0] != "web" {
-		t.Fatalf("expected failed service first, got %q", keys[0])
-	}
-	if keys[1] != "cache" || keys[2] != "db" {
-		t.Fatalf("expected remaining services sorted, got %#v", keys)
+	if got := failedContainerLogKey(composePSContainer{Service: "web"}); got != "web" {
+		t.Fatalf("expected service fallback key, got %q", got)
 	}
 }

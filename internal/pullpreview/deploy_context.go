@@ -20,7 +20,6 @@ const (
 	dockerProjectName = "app"
 
 	composeFailureReportServiceLimit = 5
-	composeFailureReportLogTail      = 120
 	composeFailureReportOutputLimit  = 8000
 )
 
@@ -516,10 +515,6 @@ func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 		i.emitComposeFailureReport(env, contextName, composeConfig, upArgs, err)
 		return err
 	}
-
-	if err := i.runComposeCommandWithConfig(env, contextName, composeConfig, "logs", "--tail", "1000"); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -676,39 +671,7 @@ func (i *Instance) composeFailureReport(env []string, contextName string, compos
 	}
 
 	failed := selectFailedContainers(containers)
-	logTargets := failed
-	if len(logTargets) == 0 {
-		logTargets = containers
-	}
-	if len(logTargets) > composeFailureReportServiceLimit {
-		logTargets = logTargets[:composeFailureReportServiceLimit]
-	}
-
-	serviceLogs := map[string]string{}
-	for _, container := range logTargets {
-		service := strings.TrimSpace(container.Service)
-		if service == "" {
-			continue
-		}
-		if _, seen := serviceLogs[service]; seen {
-			continue
-		}
-		logOutput, err := i.runComposeCommandCaptureWithConfig(
-			env,
-			contextName,
-			composeConfig,
-			"logs",
-			"--tail",
-			strconv.Itoa(composeFailureReportLogTail),
-			service,
-		)
-		if err != nil {
-			diagnostics = append(diagnostics, fmt.Sprintf("Unable to collect logs for service %s: %v", service, err))
-		}
-		serviceLogs[service] = strings.TrimSpace(logOutput)
-	}
-
-	return renderComposeFailureReport(i, upArgs, upErr, failed, psOutput, serviceLogs, diagnostics)
+	return renderComposeFailureReport(i, upArgs, upErr, containers, failed, psOutput, diagnostics)
 }
 
 func parseComposePSOutput(raw string) ([]composePSContainer, error) {
@@ -805,10 +768,7 @@ func selectFailedContainers(containers []composePSContainer) []composePSContaine
 		if !container.isFailed() {
 			continue
 		}
-		key := strings.TrimSpace(container.Service)
-		if key == "" {
-			key = strings.TrimSpace(container.Name)
-		}
+		key := failedContainerLogKey(container)
 		if key == "" || seen[key] {
 			continue
 		}
@@ -819,6 +779,14 @@ func selectFailedContainers(containers []composePSContainer) []composePSContaine
 		}
 	}
 	return out
+}
+
+func failedContainerLogKey(container composePSContainer) string {
+	name := strings.TrimSpace(container.Name)
+	if name != "" {
+		return name
+	}
+	return strings.TrimSpace(container.Service)
 }
 
 func (c composePSContainer) isFailed() bool {
@@ -840,9 +808,9 @@ func renderComposeFailureReport(
 	instance *Instance,
 	upArgs []string,
 	upErr error,
+	containers []composePSContainer,
 	failed []composePSContainer,
 	psOutput string,
-	serviceLogs map[string]string,
 	diagnostics []string,
 ) string {
 	ssh := ""
@@ -870,72 +838,27 @@ func renderComposeFailureReport(
 	}
 	b.WriteString(fmt.Sprintf("- Authorized GitHub users: `%s`\n\n", admins))
 
-	b.WriteString("### Failed Containers\n\n")
-	if len(failed) == 0 {
-		b.WriteString("No failed containers were detected automatically.\n\n")
-	} else {
-		for _, container := range failed {
-			service := strings.TrimSpace(container.Service)
-			if service == "" {
-				service = "(unknown service)"
-			}
-			name := strings.TrimSpace(container.Name)
-			if name == "" {
-				name = "(unknown container)"
-			}
-			state := strings.TrimSpace(container.State)
-			if state == "" {
-				state = "unknown"
-			}
-			health := strings.TrimSpace(container.Health)
-			if health == "" {
-				health = "n/a"
-			}
-			b.WriteString(fmt.Sprintf("- `%s` (`%s`) state=`%s` health=`%s` exit_code=`%d`\n", service, name, state, health, container.ExitCode))
-		}
-		b.WriteString("\n")
-	}
+	b.WriteString(renderContainerHealthOverview(containers, failed))
 
 	b.WriteString("### Connect and Troubleshoot\n\n")
-	b.WriteString("```bash\n")
+	b.WriteString("Diagnostics below are captured on the runner via Docker context.\n\n")
 	if strings.TrimSpace(ssh) != "" {
+		b.WriteString("```bash\n")
 		b.WriteString(fmt.Sprintf("ssh %s\n", ssh))
-	}
-	b.WriteString("cd /app\n")
-	b.WriteString("docker compose ps -a\n")
-	if len(failed) == 0 {
-		b.WriteString("docker compose logs --tail 200\n")
+		b.WriteString("# then on the instance:\n")
+		b.WriteString("docker ps -a\n")
+		b.WriteString("```\n\n")
 	} else {
-		for _, container := range failed {
-			service := strings.TrimSpace(container.Service)
-			if service == "" {
-				continue
-			}
-			b.WriteString(fmt.Sprintf("docker compose logs --tail 200 %s\n", service))
-		}
+		b.WriteString("```bash\n")
+		b.WriteString("docker ps -a\n")
+		b.WriteString("```\n\n")
 	}
-	b.WriteString("docker compose config\n")
-	b.WriteString("```\n\n")
 
 	if strings.TrimSpace(psOutput) != "" {
 		b.WriteString("### `docker compose ps -a`\n\n")
 		b.WriteString("```text\n")
 		b.WriteString(truncateReportOutput(psOutput, composeFailureReportOutputLimit))
 		b.WriteString("\n```\n\n")
-	}
-
-	if len(serviceLogs) > 0 {
-		services := orderedServiceLogKeys(failed, serviceLogs)
-		for _, service := range services {
-			logOutput := strings.TrimSpace(serviceLogs[service])
-			if logOutput == "" {
-				continue
-			}
-			b.WriteString(fmt.Sprintf("### Recent Logs: `%s`\n\n", service))
-			b.WriteString("```text\n")
-			b.WriteString(truncateReportOutput(logOutput, composeFailureReportOutputLimit))
-			b.WriteString("\n```\n\n")
-		}
 	}
 
 	if len(diagnostics) > 0 {
@@ -949,6 +872,61 @@ func renderComposeFailureReport(
 	return strings.TrimSpace(b.String())
 }
 
+func renderContainerHealthOverview(containers []composePSContainer, failed []composePSContainer) string {
+	var b strings.Builder
+	b.WriteString("### Container Health Overview\n\n")
+	if len(containers) == 0 {
+		b.WriteString("Container status could not be determined.\n\n")
+		return b.String()
+	}
+
+	runningCount := 0
+	unhealthyCount := 0
+	for _, container := range containers {
+		if strings.EqualFold(strings.TrimSpace(container.State), "running") {
+			runningCount++
+		}
+		if strings.EqualFold(strings.TrimSpace(container.Health), "unhealthy") {
+			unhealthyCount++
+		}
+	}
+
+	b.WriteString(fmt.Sprintf(
+		"- Total containers: `%d`\n- Running: `%d`\n- Failed: `%d`\n- Unhealthy: `%d`\n\n",
+		len(containers),
+		runningCount,
+		len(failed),
+		unhealthyCount,
+	))
+
+	for _, container := range containers {
+		service := strings.TrimSpace(container.Service)
+		if service == "" {
+			service = "(unknown service)"
+		}
+		name := strings.TrimSpace(container.Name)
+		if name == "" {
+			name = "(unknown container)"
+		}
+		state := strings.TrimSpace(container.State)
+		if state == "" {
+			state = "unknown"
+		}
+		health := strings.TrimSpace(container.Health)
+		if health == "" {
+			health = "n/a"
+		}
+
+		status := "ok"
+		if container.isFailed() {
+			status = "failed"
+		}
+		b.WriteString(fmt.Sprintf("- `%s` (`%s`) state=`%s` health=`%s` exit_code=`%d` status=`%s`\n", service, name, state, health, container.ExitCode, status))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 func truncateReportOutput(value string, maxLen int) string {
 	value = strings.TrimSpace(value)
 	if maxLen <= 0 || len(value) <= maxLen {
@@ -960,30 +938,6 @@ func truncateReportOutput(value string, maxLen int) string {
 		limit = 0
 	}
 	return strings.TrimSpace(value[:limit]) + suffix
-}
-
-func orderedServiceLogKeys(failed []composePSContainer, serviceLogs map[string]string) []string {
-	seen := map[string]bool{}
-	ordered := []string{}
-	for _, container := range failed {
-		service := strings.TrimSpace(container.Service)
-		if service == "" || seen[service] {
-			continue
-		}
-		ordered = append(ordered, service)
-		seen[service] = true
-	}
-
-	remaining := []string{}
-	for service := range serviceLogs {
-		service = strings.TrimSpace(service)
-		if service == "" || seen[service] {
-			continue
-		}
-		remaining = append(remaining, service)
-	}
-	sort.Strings(remaining)
-	return append(ordered, remaining...)
 }
 
 func appendStepSummary(content string, logger *Logger) {
