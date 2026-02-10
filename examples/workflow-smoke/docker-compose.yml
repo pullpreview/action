@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  db:
+    image: ghcr.io/pullpreview/mysql:5.7
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: app
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app_password
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./dumps:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  web:
+    build: ./web
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: app
+      DB_PASSWORD: app_password
+      DB_NAME: app
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "80:8080"
+
+volumes:
+  db_data:

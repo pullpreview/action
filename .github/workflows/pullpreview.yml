@@ -5,47 +5,138 @@ on:
   push:
     branches:
       - master
-      - v5
+      - v6
   pull_request:
-    types: [labeled, unlabeled, synchronize, closed, reopened]
+    types: [labeled, unlabeled, synchronize, closed, reopened, opened]
 
 concurrency: ${{ github.ref }}
 
 permissions:
   contents: read # to fetch code (actions/checkout)
-  deployments: write # to delete deployments
-  pull-requests: write # to remove labels
-  statuses: write # to create commit status
+  pull-requests: write # to remove labels / write PR comments
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
+  deploy_smoke_1:
+    runs-on: ubuntu-slim
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-      - uses: "./"
+      - uses: actions/checkout@v6
+
+      - name: Deploy smoke app (v1)
+        id: pullpreview
+        uses: "./"
         with:
           admins: "@collaborators/push"
-          always_on: master,v5
-          app_path: ./examples/wordpress
+          always_on: master,v6
+          app_path: ./examples/workflow-smoke
           instance_type: micro
           # only required if using custom domain for your preview environments
-          dns: custom.preview.run
+          dns: preview.chunk.io
           max_domain_length: 30
-          # only required if fetching images from private registry
+          # Enable HTTPS preview URL through Caddy + Let's Encrypt.
+          proxy_tls: web:8080
+          # required here because the mysql image is private in GHCR
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
           # how long this instance will stay alive (each further commit will reset the timer)
           ttl: 1h
-          # preinstall script to run on the instance before docker-compose is called, relative to the app_path
-          pre_script: ./pre_script.sh
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-      # # Uncomment the following if need to debug
-      # - name: Setup tmate session
-      #   if: always()
-      #   uses: mxschmitt/action-tmate@v3
-      #   timeout-minutes: 45
-      #   with:
-      #     limit-access-to-actor: true
+
+      - name: Assert deploy v1 and DB seed state
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${PREVIEW_URL}" != https://* ]]; then
+            echo "::error::Expected https preview URL when proxy_tls is enabled, got ${PREVIEW_URL}"
+            exit 1
+          fi
+
+          response=""
+          for attempt in $(seq 1 60); do
+            response="$(curl -fsSL --max-time 15 "${PREVIEW_URL}" || true)"
+            if printf '%s' "${response}" | grep -q 'Hello World Deploy 1' && \
+              printf '%s' "${response}" | grep -q 'seed_count=1' && \
+              printf '%s' "${response}" | grep -q 'seed_label=persisted'; then
+              echo "Smoke v1 checks passed for ${PREVIEW_URL}"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/60: waiting for v1 response from ${PREVIEW_URL}"
+            sleep 5
+          done
+
+          echo "::error::Unexpected response from ${PREVIEW_URL}"
+          printf '%s\n' "${response}"
+          exit 1
+
+  deploy_smoke_2:
+    runs-on: ubuntu-slim
+    needs: deploy_smoke_1
+    if: needs.deploy_smoke_1.result == 'success'
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Update app payload to v2
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          printf '%s\n' 'Hello World Deploy 2' > examples/workflow-smoke/web/message.txt
+
+          # This file should be synced, but with persistent DB volume it should not run.
+          cat > examples/workflow-smoke/dumps/999_should_not_run.sql <<'SQL'
+          INSERT INTO seed_data (label) VALUES ('should-not-run');
+          SQL
+
+      - name: Redeploy smoke app (v2)
+        id: pullpreview
+        uses: "./"
+        with:
+          admins: "@collaborators/push"
+          always_on: master,v6
+          app_path: ./examples/workflow-smoke
+          instance_type: micro
+          dns: preview.chunk.io
+          max_domain_length: 30
+          proxy_tls: web:8080
+          registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+          ttl: 1h
+        env:
+          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+
+      - name: Assert deploy v2 and DB persistence
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${PREVIEW_URL}" != https://* ]]; then
+            echo "::error::Expected https preview URL when proxy_tls is enabled, got ${PREVIEW_URL}"
+            exit 1
+          fi
+
+          response=""
+          for attempt in $(seq 1 60); do
+            response="$(curl -fsSL --max-time 15 "${PREVIEW_URL}" || true)"
+            if printf '%s' "${response}" | grep -q 'Hello World Deploy 2' && \
+              printf '%s' "${response}" | grep -q 'seed_count=1' && \
+              printf '%s' "${response}" | grep -q 'seed_label=persisted'; then
+              echo "Smoke v2 checks passed for ${PREVIEW_URL}"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/60: waiting for v2 response from ${PREVIEW_URL}"
+            sleep 5
+          done
+
+          echo "::error::Unexpected response from ${PREVIEW_URL}"
+          printf '%s\n' "${response}"
+          exit 1

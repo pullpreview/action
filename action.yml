@@ -7,7 +7,7 @@ branding:
 inputs:
   app_path:
     description: "The path to your application containing a docker-compose file"
-    default: "/github/workspace"
+    default: "."
     required: false
   always_on:
     description: "List of always-on branches, irrespective of whether they correspond to an open Pull Request, comma-separated"
@@ -22,7 +22,7 @@ inputs:
     description: "Label to use for triggering preview deployments"
     default: "pullpreview"
   github_token:
-    description: "The GitHub access token used to perform GitHub API operations. A custom token is only required for auto-cleanup of GitHub environment objects."
+    description: "The GitHub access token used to perform GitHub API operations (labels, comments, collaborator/keys lookup)."
     default: "${{ github.token }}"
   admins:
     description: "Logins of GitHub users that will have their SSH key installed on the instance, comma-separated"
@@ -68,8 +68,12 @@ inputs:
     description: "Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io"
     required: false
     default: ""
+  proxy_tls:
+    description: "Enable automatic HTTPS forwarding with Let's Encrypt (format: service:port, e.g. web:80)"
+    required: false
+    default: ""
   pre_script:
-    description: "Path to a bash script to run on the instance, before calling docker compose, relative to the app_path"
+    description: "Path to a local bash script (relative to app_path) executed inline over SSH on the instance before docker compose"
     required: false
     default: ""
   ttl:
@@ -80,47 +84,79 @@ inputs:
 outputs:
   url:
     description: "The URL of the application on the preview server"
+    value: "${{ steps.pullpreview.outputs.url }}"
   host:
     description: "The hostname or IP address of the preview server"
+    value: "${{ steps.pullpreview.outputs.host }}"
   username:
     description: "The username that can be used to SSH into the preview server"
+    value: "${{ steps.pullpreview.outputs.username }}"
 
 runs:
-  using: "docker"
-  image: "Dockerfile"
-  args:
-    - "github-sync"
-    - "${{ inputs.app_path }}"
-    - "--admins"
-    - "${{ inputs.admins }}"
-    - "--cidrs"
-    - "${{ inputs.cidrs }}"
-    - "--compose-files"
-    - "${{ inputs.compose_files }}"
-    - "--compose-options"
-    - "${{ inputs.compose_options }}"
-    - "--dns"
-    - "${{ inputs.dns }}"
-    - "--label"
-    - "${{ inputs.label }}"
-    - "--ports"
-    - "${{ inputs.ports }}"
-    - "--default-port"
-    - "${{ inputs.default_port }}"
-    - "--always-on"
-    - "${{ inputs.always_on }}"
-    - "--instance-type"
-    - "${{ inputs.instance_type }}"
-    - "--deployment-variant"
-    - "${{ inputs.deployment_variant }}"
-    - "--registries"
-    - "${{ inputs.registries }}"
-    - "--pre-script"
-    - "${{ inputs.pre_script }}"
-    - "--ttl"
-    - "${{ inputs.ttl }}"
-  env:
-    GITHUB_TOKEN: "${{ inputs.github_token }}"
-    PULLPREVIEW_LICENSE: "${{ inputs.license }}"
-    PULLPREVIEW_PROVIDER: "${{ inputs.provider }}"
-    PULLPREVIEW_MAX_DOMAIN_LENGTH: "${{ inputs.max_domain_length }}"
+  using: "composite"
+  steps:
+    - name: Restore SSH key cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/pullpreview-ssh-keys
+        key: pullpreview-ssh-keys-v1-${{ github.repository_id }}-${{ github.run_id }}
+        restore-keys: |
+          pullpreview-ssh-keys-v1-${{ github.repository_id }}-
+    - id: pullpreview
+      shell: bash
+      env:
+        GITHUB_TOKEN: "${{ inputs.github_token }}"
+        PULLPREVIEW_LICENSE: "${{ inputs.license }}"
+        PULLPREVIEW_PROVIDER: "${{ inputs.provider }}"
+        PULLPREVIEW_MAX_DOMAIN_LENGTH: "${{ inputs.max_domain_length }}"
+        PULLPREVIEW_SSH_KEYS_CACHE_DIR: "${{ runner.temp }}/pullpreview-ssh-keys"
+        PULLPREVIEW_GITHUB_JOB_ID: "${{ job.check_run_id }}"
+      run: |
+        set -euo pipefail
+        mkdir -p "${PULLPREVIEW_SSH_KEYS_CACHE_DIR}"
+
+        os="$(echo "${RUNNER_OS}" | tr '[:upper:]' '[:lower:]')"
+        arch="$(echo "${RUNNER_ARCH}" | tr '[:upper:]' '[:lower:]')"
+        if [ "${os}" != "linux" ]; then
+          echo "::error::Unsupported RUNNER_OS=${RUNNER_OS}. Only Linux amd64 is supported."
+          exit 1
+        fi
+        case "${arch}" in
+          x64) arch="amd64" ;;
+          amd64) arch="amd64" ;;
+          *)
+            echo "::error::Unsupported RUNNER_ARCH=${RUNNER_ARCH}. Only amd64 is supported."
+            exit 1
+            ;;
+        esac
+
+        binary="${GITHUB_ACTION_PATH}/dist/pullpreview-${os}-${arch}"
+        if [ ! -f "${binary}" ]; then
+          echo "::error::Bundled binary not found at ${binary}. Run 'make dist' and commit dist artifacts."
+          ls -la "${GITHUB_ACTION_PATH}/dist" || true
+          exit 1
+        fi
+        chmod +x "${binary}"
+
+        app_path="${{ inputs.app_path }}"
+        # Backward compatibility for Docker-era defaults; composite actions run in $GITHUB_WORKSPACE.
+        if [ -z "${app_path}" ] || [ "${app_path}" = "/github/workspace" ]; then
+          app_path="${GITHUB_WORKSPACE}"
+        fi
+
+        "${binary}" github-sync "${app_path}" \
+          --admins "${{ inputs.admins }}" \
+          --cidrs "${{ inputs.cidrs }}" \
+          --compose-files "${{ inputs.compose_files }}" \
+          --compose-options "${{ inputs.compose_options }}" \
+          --dns "${{ inputs.dns }}" \
+          --label "${{ inputs.label }}" \
+          --ports "${{ inputs.ports }}" \
+          --default-port "${{ inputs.default_port }}" \
+          --always-on "${{ inputs.always_on }}" \
+          --instance-type "${{ inputs.instance_type }}" \
+          --deployment-variant "${{ inputs.deployment_variant }}" \
+          --registries "${{ inputs.registries }}" \
+          --proxy-tls "${{ inputs.proxy_tls }}" \
+          --pre-script "${{ inputs.pre_script }}" \
+          --ttl "${{ inputs.ttl }}"

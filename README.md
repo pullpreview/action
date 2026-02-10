@@ -22,10 +22,29 @@ It is designed to be the **no-nonsense, cheap, and secure** alternative to
 services that require access to your code and force your app to fit within
 their specific deployment system and/or require a specific config file.
 
-<img src="img/2-add-label.png">
-<img src="img/3-deploy-starts.png">
-<img src="img/5-view-deployment.png">
-<img src="img/6-deploy-next-commit-pending.png">
+### Step 1 — Add the `pullpreview` label
+
+Adding the label triggers the deployment. A PR comment appears immediately with the status set to pending.
+
+<img src="img/01-label-added.png">
+
+### Step 2 — Instance is provisioned
+
+PullPreview creates (or restores) a Lightsail instance and waits for SSH access.
+
+<img src="img/02-deploying.png">
+
+### Step 3 — Preview environment is live
+
+The PR comment is updated with a live preview URL.
+
+<img src="img/03-deploy-successful.png">
+
+### Step 4 — Remove the label to destroy the preview
+
+When the label is removed, the preview environment is automatically destroyed.
+
+<img src="img/04-preview-destroyed.png">
 
 ## Useful for the entire team
 
@@ -54,13 +73,16 @@ Preview environments that:
   a GitHub Action, which means your code never leaves GitHub or your Lightsail
   instances.
 
-- make the preview URL **easy to find** for your reviewers: Deployment statuses
-  and URLs are visible in the PR checks section, and on the Deployments tab in
-  the GitHub UI.
+- make the preview URL **easy to find** for your reviewers: Marker-based PR
+  comments are updated with live preview state and URL.
 
 - **persist state** across deploys: Any state stored in docker volumes (e.g.
   database data) will be persisted across deploys, making the life of reviewers
   easier.
+
+- can **auto-enable HTTPS** with Let's Encrypt: Set `proxy_tls` to inject a
+  Caddy reverse proxy that terminates TLS and forwards traffic to your service.
+  This switches the preview URL to HTTPS on port `443`.
 
 - are **easy to troubleshoot**: You can give specific GitHub users the
   authorization to SSH into the preview instance (with sudo privileges) to
@@ -69,11 +91,7 @@ Preview environments that:
 
 - are **integrated into the GitHub UI**: Logs for each deployment run are
   available within the Actions section, and direct links to the preview
-  environments are available in the Checks section of a PR, and in the
-  Deployments tab of the repository.
-
-<img src="img/4-view-logs.png" />
-<img src="img/8-list-deployments.png" />
+  environments are available in PullPreview PR comments.
 
 ## Installation & Usage
 
@@ -84,6 +102,40 @@ Preview environments that:
 - [FAQ](https://github.com/pullpreview/action/wiki/FAQ)
 
 &rarr; Please see the [wiki](https://github.com/pullpreview/action/wiki) for the full documentation.
+
+## Action Inputs (v6)
+
+All supported `with:` inputs from `action.yml`:
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `app_path` | `.` | Path to your application containing Docker Compose files (relative to `${{ github.workspace }}`). |
+| `always_on` | `""` | Comma-separated branch names that should always be deployed. |
+| `dns` | `my.preview.run` | DNS suffix used for generated preview hostnames. Built-in alternatives: `rev1.click` through `rev9.click` (see note below). |
+| `max_domain_length` | `62` | Maximum generated FQDN length (cannot exceed 62 for Let's Encrypt). |
+| `label` | `pullpreview` | Label that triggers preview deployments. |
+| `github_token` | `${{ github.token }}` | GitHub token used for labels/comments/collaborator/key API operations. |
+| `admins` | `@collaborators/push` | Comma-separated GitHub users whose SSH keys are installed on preview instances. |
+| `ports` | `80/tcp,443/tcp` | Firewall ports to expose publicly (SSH `22` is always open). |
+| `cidrs` | `0.0.0.0/0` | Allowed source CIDR ranges for exposed ports. |
+| `default_port` | `80` | Port used to build the preview URL output. |
+| `compose_files` | `docker-compose.yml` | Comma-separated Compose files passed to deploy. |
+| `compose_options` | `--build` | Additional options appended to `docker compose up`. |
+| `license` | `""` | PullPreview license key. |
+| `instance_type` | `small` | Lightsail instance bundle (`nano`, `micro`, `small`, etc.). |
+| `deployment_variant` | `""` | Optional short suffix to run multiple preview environments per PR (max 4 chars). |
+| `provider` | `lightsail` | Cloud provider (currently Lightsail). |
+| `registries` | `""` | Private registry credentials, e.g. `docker://user:password@ghcr.io`. |
+| `proxy_tls` | `""` | Automatic HTTPS forwarding with Caddy + Let's Encrypt (`service:port`, e.g. `web:80`). |
+| `pre_script` | `""` | Path to a local shell script (relative to `app_path`) executed inline over SSH before compose deploy (should be self-contained). |
+| `ttl` | `infinite` | Maximum deployment lifetime (e.g. `10h`, `5d`, `infinite`). |
+
+Notes:
+
+- `proxy_tls` forces URL/output/comment links to HTTPS on port `443`, injects a Caddy proxy service, and suppresses firewall exposure for port `80`. **When using `proxy_tls`, it is strongly recommended to set `dns` to a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain) or one of the built-in `revN.click` alternatives** to avoid hitting shared Let's Encrypt rate limits on `my.preview.run`.
+- `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
+- SSH key fetches are cached between runs in the action cache.
+- **Let's Encrypt rate limits**: Let's Encrypt allows a maximum of [50 certificates per registered domain per week](https://letsencrypt.org/docs/rate-limits/#new-certificates-per-registered-domain). If you use `proxy_tls` and hit this limit on the default `my.preview.run` domain, switch to one of the built-in alternatives: `rev1.click`, `rev2.click`, ... `rev9.click`. Set `dns: rev1.click` in your workflow inputs. You can also use a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain).
 
 ## Example
 
@@ -108,8 +160,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: pullpreview/action@v5
+      - uses: actions/checkout@v5
+      - uses: pullpreview/action@v6
         with:
           # Those GitHub users will have SSH access to the servers
           admins: crohr,other-github-user
@@ -125,6 +177,8 @@ jobs:
           instance_type: nano
           # Ports to open on the server
           ports: 80,5432
+          # Optional: automatic HTTPS forwarding via Caddy + Let's Encrypt
+          proxy_tls: web:80
         env:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
