@@ -30,7 +30,7 @@ Adding the label triggers the deployment. A PR comment appears immediately with 
 
 ### Step 2 — Instance is provisioned
 
-PullPreview creates (or restores) an EC2 instance and waits for SSH access.
+PullPreview creates (or restores) a Lightsail instance and waits for SSH access.
 
 <img src="img/02-deploying.png">
 
@@ -93,8 +93,6 @@ Preview environments that:
   available within the Actions section, and direct links to the preview
   environments are available in PullPreview PR comments.
 
-<img src="img/02-deploying.png" />
-
 ## Installation & Usage
 
 - [Getting Started](https://github.com/pullpreview/action/wiki/Getting-Started)
@@ -113,7 +111,7 @@ All supported `with:` inputs from `action.yml`:
 | --- | --- | --- |
 | `app_path` | `.` | Path to your application containing Docker Compose files (relative to `${{ github.workspace }}`). |
 | `always_on` | `""` | Comma-separated branch names that should always be deployed. |
-| `dns` | `my.preview.run` | DNS suffix used for generated preview hostnames. |
+| `dns` | `my.preview.run` | DNS suffix used for generated preview hostnames. Built-in alternatives: `rev1.click` through `rev9.click` (see note below). |
 | `max_domain_length` | `62` | Maximum generated FQDN length (cannot exceed 62 for Let's Encrypt). |
 | `label` | `pullpreview` | Label that triggers preview deployments. |
 | `github_token` | `${{ github.token }}` | GitHub token used for labels/comments/collaborator/key API operations. |
@@ -134,9 +132,10 @@ All supported `with:` inputs from `action.yml`:
 
 Notes:
 
-- `proxy_tls` forces URL/output/comment links to HTTPS on port `443`, injects a Caddy proxy service, and suppresses firewall exposure for port `80`.
+- `proxy_tls` forces URL/output/comment links to HTTPS on port `443`, injects a Caddy proxy service, and suppresses firewall exposure for port `80`. **When using `proxy_tls`, it is strongly recommended to set `dns` to a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain) or one of the built-in `revN.click` alternatives** to avoid hitting shared Let's Encrypt rate limits on `my.preview.run`.
 - `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
 - SSH key fetches are cached between runs in the action cache.
+- **Let's Encrypt rate limits**: Let's Encrypt allows a maximum of [50 certificates per registered domain per week](https://letsencrypt.org/docs/rate-limits/#new-certificates-per-registered-domain). If you use `proxy_tls` and hit this limit on the default `my.preview.run` domain, switch to one of the built-in alternatives: `rev1.click`, `rev2.click`, ... `rev9.click`. Set `dns: rev1.click` in your workflow inputs. You can also use a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain).
 
 ## Example
 
