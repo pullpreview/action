@@ -512,7 +512,7 @@ func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 	upArgs := []string{"up", "--wait", "--remove-orphans", "-d"}
 	upArgs = append(upArgs, i.ComposeOptions...)
 	if err := i.runComposeCommandWithConfig(env, contextName, composeConfig, upArgs...); err != nil {
-		i.emitComposeFailureReport(env, contextName, composeConfig, upArgs, err)
+		i.emitComposeFailureReport(env, contextName, upArgs, err)
 		return err
 	}
 	return nil
@@ -636,8 +636,25 @@ func mergeCommandOutput(stdout, stderr string) string {
 	return stdout + "\n" + stderr
 }
 
-func (i *Instance) emitComposeFailureReport(env []string, contextName string, composeConfig []byte, upArgs []string, upErr error) {
-	report := i.composeFailureReport(env, contextName, composeConfig, upArgs, upErr)
+func (i *Instance) runDockerCommandOnContextCapture(env []string, contextName string, args ...string) (string, error) {
+	cmdArgs := []string{"--context", contextName}
+	cmdArgs = append(cmdArgs, args...)
+	cmd := exec.CommandContext(i.Context, "docker", cmdArgs...)
+	cmd.Env = env
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	output := mergeCommandOutput(stdout.String(), stderr.String())
+	if err != nil {
+		return output, fmt.Errorf("docker %s failed: %w", strings.Join(args, " "), err)
+	}
+	return output, nil
+}
+
+func (i *Instance) emitComposeFailureReport(env []string, contextName string, upArgs []string, upErr error) {
+	report := i.composeFailureReport(env, contextName, upArgs, upErr)
 	if strings.TrimSpace(report) == "" {
 		return
 	}
@@ -649,116 +666,137 @@ func (i *Instance) emitComposeFailureReport(env []string, contextName string, co
 	appendStepSummary(report, i.Logger)
 }
 
-func (i *Instance) composeFailureReport(env []string, contextName string, composeConfig []byte, upArgs []string, upErr error) string {
+func (i *Instance) composeFailureReport(env []string, contextName string, upArgs []string, upErr error) string {
 	diagnostics := []string{}
-	psOutput, psErr := i.runComposeCommandCaptureWithConfig(env, contextName, composeConfig, "ps", "-a", "--format", "json")
-	if psErr != nil {
-		diagnostics = append(diagnostics, fmt.Sprintf("Unable to run docker compose ps -a --format json: %v", psErr))
-		psOutput, psErr = i.runComposeCommandCaptureWithConfig(env, contextName, composeConfig, "ps", "-a")
-		if psErr != nil {
-			diagnostics = append(diagnostics, fmt.Sprintf("Unable to run docker compose ps -a: %v", psErr))
-		}
+	projectFilter := "label=com.docker.compose.project=" + dockerProjectName
+
+	dockerPSOutput, dockerPSErr := i.runDockerCommandOnContextCapture(env, contextName, "ps", "-a", "--filter", projectFilter)
+	if dockerPSErr != nil {
+		diagnostics = append(diagnostics, fmt.Sprintf("Unable to run docker ps -a on runner context: %v", dockerPSErr))
+		dockerPSOutput = ""
+	}
+
+	dockerPSJSONOutput, dockerPSJSONErr := i.runDockerCommandOnContextCapture(
+		env,
+		contextName,
+		"ps",
+		"-a",
+		"--filter",
+		projectFilter,
+		"--format",
+		"{{json .}}",
+	)
+	if dockerPSJSONErr != nil {
+		diagnostics = append(diagnostics, fmt.Sprintf("Unable to run docker ps -a --format '{{json .}}' on runner context: %v", dockerPSJSONErr))
 	}
 
 	containers := []composePSContainer{}
-	if strings.TrimSpace(psOutput) != "" {
-		parsed, err := parseComposePSOutput(psOutput)
+	if dockerPSJSONErr == nil && strings.TrimSpace(dockerPSJSONOutput) != "" {
+		parsed, err := parseDockerPSOutput(dockerPSJSONOutput)
 		if err != nil {
-			diagnostics = append(diagnostics, fmt.Sprintf("Unable to parse docker compose ps output: %v", err))
+			diagnostics = append(diagnostics, fmt.Sprintf("Unable to parse docker ps output: %v", err))
 		} else {
 			containers = parsed
 		}
 	}
 
 	failed := selectFailedContainers(containers)
-	return renderComposeFailureReport(i, upArgs, upErr, containers, failed, psOutput, diagnostics)
+	return renderComposeFailureReport(i, upArgs, upErr, containers, failed, dockerPSOutput, diagnostics)
 }
 
-func parseComposePSOutput(raw string) ([]composePSContainer, error) {
+func parseDockerPSOutput(raw string) ([]composePSContainer, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, fmt.Errorf("empty output")
+		return []composePSContainer{}, nil
 	}
 
-	objects := []map[string]any{}
-	if strings.HasPrefix(raw, "[") {
-		if err := json.Unmarshal([]byte(raw), &objects); err != nil {
+	containers := []composePSContainer{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var row struct {
+			Names  string `json:"Names"`
+			Status string `json:"Status"`
+			Labels string `json:"Labels"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			return nil, err
 		}
-	} else {
-		for _, line := range strings.Split(raw, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			var object map[string]any
-			if err := json.Unmarshal([]byte(line), &object); err != nil {
-				return nil, err
-			}
-			objects = append(objects, object)
+		state, health, exitCode := parseDockerPSStatus(row.Status)
+		service := dockerPSLabelValue(row.Labels, "com.docker.compose.service")
+		if service == "" {
+			service = strings.TrimSpace(row.Names)
 		}
-	}
-	if len(objects) == 0 {
-		return nil, fmt.Errorf("no containers found")
-	}
-
-	containers := make([]composePSContainer, 0, len(objects))
-	for _, object := range objects {
 		containers = append(containers, composePSContainer{
-			Service:  composePSFieldString(object, "Service", "service"),
-			Name:     composePSFieldString(object, "Name", "name"),
-			State:    composePSFieldString(object, "State", "Status", "state"),
-			Health:   composePSFieldString(object, "Health", "health"),
-			ExitCode: composePSFieldInt(object, "ExitCode", "exit_code"),
+			Service:  service,
+			Name:     strings.TrimSpace(row.Names),
+			State:    state,
+			Health:   health,
+			ExitCode: exitCode,
 		})
 	}
 	return containers, nil
 }
 
-func composePSFieldString(values map[string]any, keys ...string) string {
-	for _, key := range keys {
-		value, ok := values[key]
-		if !ok {
+func dockerPSLabelValue(labels string, key string) string {
+	for _, pair := range strings.Split(labels, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
 			continue
 		}
-		switch typed := value.(type) {
-		case string:
-			if strings.TrimSpace(typed) != "" {
-				return strings.TrimSpace(typed)
-			}
-		case float64:
-			return strconv.Itoa(int(typed))
-		case json.Number:
-			return typed.String()
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.TrimSpace(parts[0]) == key {
+			return strings.TrimSpace(parts[1])
 		}
 	}
 	return ""
 }
 
-func composePSFieldInt(values map[string]any, keys ...string) int {
-	for _, key := range keys {
-		value, ok := values[key]
-		if !ok {
-			continue
-		}
-		switch typed := value.(type) {
-		case float64:
-			return int(typed)
-		case int:
-			return typed
-		case int64:
-			return int(typed)
-		case json.Number:
-			if parsed, err := typed.Int64(); err == nil {
-				return int(parsed)
-			}
-		case string:
-			if parsed, err := strconv.Atoi(strings.TrimSpace(typed)); err == nil {
-				return parsed
+func parseDockerPSStatus(status string) (string, string, int) {
+	s := strings.ToLower(strings.TrimSpace(status))
+	state := "unknown"
+	switch {
+	case strings.HasPrefix(s, "up "):
+		state = "running"
+	case strings.HasPrefix(s, "exited "):
+		state = "exited"
+	case strings.HasPrefix(s, "created"):
+		state = "created"
+	case strings.HasPrefix(s, "restarting"):
+		state = "restarting"
+	case strings.HasPrefix(s, "paused"):
+		state = "paused"
+	case strings.HasPrefix(s, "dead"):
+		state = "dead"
+	case strings.HasPrefix(s, "removing"):
+		state = "removing"
+	}
+
+	health := ""
+	switch {
+	case strings.Contains(s, "(unhealthy)"):
+		health = "unhealthy"
+	case strings.Contains(s, "(healthy)"):
+		health = "healthy"
+	case strings.Contains(s, "(health: starting)"):
+		health = "starting"
+	}
+
+	exitCode := 0
+	if strings.HasPrefix(s, "exited (") {
+		rest := strings.TrimPrefix(s, "exited (")
+		if idx := strings.Index(rest, ")"); idx > 0 {
+			if code, err := strconv.Atoi(strings.TrimSpace(rest[:idx])); err == nil {
+				exitCode = code
 			}
 		}
 	}
-	return 0
+	return state, health, exitCode
 }
 
 func selectFailedContainers(containers []composePSContainer) []composePSContainer {
@@ -855,7 +893,7 @@ func renderComposeFailureReport(
 	}
 
 	if strings.TrimSpace(psOutput) != "" {
-		b.WriteString("### `docker compose ps -a`\n\n")
+		b.WriteString("### `docker ps -a` (runner context)\n\n")
 		b.WriteString("```text\n")
 		b.WriteString(truncateReportOutput(psOutput, composeFailureReportOutputLimit))
 		b.WriteString("\n```\n\n")
