@@ -244,22 +244,25 @@ func TestInlinePreScriptLoadsLocalScriptContent(t *testing.T) {
 	}
 }
 
-func TestParseComposePSOutputJSON(t *testing.T) {
-	raw := `[
-		{"Service":"web","Name":"app-web-1","State":"exited","Health":"","ExitCode":1},
-		{"Service":"db","Name":"app-db-1","State":"running","Health":"unhealthy","ExitCode":0},
-		{"Service":"cache","Name":"app-cache-1","State":"running","Health":"","ExitCode":0}
-	]`
+func TestParseDockerPSOutputJSONLines(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"Names":"app-web-1","Status":"Exited (1) 5 seconds ago","Labels":"com.docker.compose.project=app,com.docker.compose.service=web"}`,
+		`{"Names":"app-db-1","Status":"Up 2 minutes (unhealthy)","Labels":"com.docker.compose.project=app,com.docker.compose.service=db"}`,
+		`{"Names":"app-cache-1","Status":"Up 2 minutes","Labels":"com.docker.compose.project=app,com.docker.compose.service=cache"}`,
+	}, "\n")
 
-	containers, err := parseComposePSOutput(raw)
+	containers, err := parseDockerPSOutput(raw)
 	if err != nil {
-		t.Fatalf("parseComposePSOutput() error: %v", err)
+		t.Fatalf("parseDockerPSOutput() error: %v", err)
 	}
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
 	}
-	if containers[0].Service != "web" || containers[0].Name != "app-web-1" || containers[0].ExitCode != 1 {
+	if containers[0].Service != "web" || containers[0].Name != "app-web-1" || containers[0].State != "exited" || containers[0].ExitCode != 1 {
 		t.Fatalf("unexpected first container: %#v", containers[0])
+	}
+	if containers[1].Service != "db" || containers[1].Health != "unhealthy" || containers[1].State != "running" {
+		t.Fatalf("unexpected second container: %#v", containers[1])
 	}
 }
 
@@ -324,6 +327,9 @@ func TestRenderComposeFailureReportIncludesTroubleshooting(t *testing.T) {
 	}
 	if strings.Contains(report, "Last 20 log lines") {
 		t.Fatalf("did not expect report to include container logs, got:\n%s", report)
+	}
+	if strings.Contains(report, "docker compose ps -a") {
+		t.Fatalf("did not expect report to include docker compose ps command, got:\n%s", report)
 	}
 }
 
