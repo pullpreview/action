@@ -27,10 +27,29 @@ It is designed to be the **no-nonsense, cheap, and secure** alternative to
 services that require access to your code and force your app to fit within
 their specific deployment system and/or require a specific config file.
 
-<img src="img/2-add-label.png">
-<img src="img/3-deploy-starts.png">
-<img src="img/5-view-deployment.png">
-<img src="img/6-deploy-next-commit-pending.png">
+### Step 1 — Add the `pullpreview` label
+
+Adding the label triggers the deployment. A PR comment appears immediately with the status set to pending.
+
+<img src="img/01-label-added.png">
+
+### Step 2 — Instance is provisioned
+
+PullPreview creates (or restores) an EC2 instance and waits for SSH access.
+
+<img src="img/02-deploying.png">
+
+### Step 3 — Preview environment is live
+
+The PR comment is updated with a live preview URL.
+
+<img src="img/03-deploy-successful.png">
+
+### Step 4 — Remove the label to destroy the preview
+
+When the label is removed, the preview environment is automatically destroyed.
+
+<img src="img/04-preview-destroyed.png">
 
 ## Useful for the entire team
 
@@ -79,8 +98,7 @@ Preview environments that:
   available within the Actions section, and direct links to the preview
   environments are available in PullPreview PR comments.
 
-<img src="img/4-view-logs.png" />
-<img src="img/8-list-deployments.png" />
+<img src="img/02-deploying.png" />
 
 ## Installation & Usage
 
