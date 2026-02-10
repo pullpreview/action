@@ -5,11 +5,6 @@ A GitHub Action that starts live environments for your pull requests and branche
 [![pullpreview](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml/badge.svg)](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml)
 <a href="https://news.ycombinator.com/item?id=23221471"><img src="https://img.shields.io/badge/Hacker%20News-83-%23FF6600" alt="Hacker News"></a>
 
-## Breaking change (v6, Go runtime)
-
-- GitHub Deployments/Environments integration has been removed. Environment URLs are now displayed in a single PR comment.
-- Workflow references should be updated to `uses: pullpreview/action@v6`.
-
 ## Spin environments in one click
 
 Once installed in your repository, this action is triggered any time a change
