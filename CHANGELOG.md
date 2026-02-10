@@ -1,11 +1,29 @@
-## master
+## v6.0.0
 
 ### Breaking changes
 
-- Removed GitHub Deployments/Environments integration from the Go action runtime.
-- PullPreview now relies on workflow checks + PR comments as the deployment UX surface.
-- Removed `comment_pr` input and `--comment-pr` CLI flag; PR comment updates are always enabled.
+- **Complete rewrite from Ruby/Docker to Go** — PullPreview now ships as a native binary in a composite action. No more Docker container overhead.
+- **Removed GitHub Deployments/Environments integration** — preview URLs are now displayed via PR comments and job summaries.
+- **Removed commit status integration** — deployment state is reported through PR comments only.
+- **Removed `comment_pr` input** — PR comment updates are always enabled.
 - Workflow references should now use `pullpreview/action@v6`.
+
+### New features
+
+- **Automatic HTTPS with `proxy_tls`** — inject a Caddy reverse proxy with Let's Encrypt certificates (e.g. `proxy_tls: web:80`).
+- **Built-in DNS alternatives** — use `rev1.click` through `rev9.click` to work around Let's Encrypt rate limits (50 certs/domain/week).
+- **`pre_script` input** — run a local shell script on the instance before docker compose.
+- **`ttl` input** — set a maximum deployment lifetime (e.g. `10h`, `5d`, `infinite`).
+- **Job summary** — deployment details are added to the GitHub Actions job summary.
+- **SSH key caching** — collaborator SSH keys are cached between workflow runs via the action cache.
+- **Compose troubleshooting** — docker container health status is displayed on deploy failures.
+- **Scheduled cleanup reconciliation** — dangling instances are reconciled against repo state during scheduled runs.
+
+### Improvements
+
+- Deploy files via rsync with bind mounts instead of Docker context.
+- PR comments are scoped by environment and job for multi-env setups.
+- PullPreview environment variables are injected during compose interpolation.
 
 ## v5.8.0
 
