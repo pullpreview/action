@@ -18,10 +18,10 @@ permissions:
 jobs:
   deploy_smoke_1:
     runs-on: ubuntu-slim
-    if: github.event_name == 'push' || (github.event.action != 'closed' && github.event.action != 'unlabeled' && (github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')))
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Deploy smoke app (v1)
         id: pullpreview
@@ -80,7 +80,7 @@ jobs:
     if: needs.deploy_smoke_1.result == 'success'
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Update app payload to v2
         shell: bash
@@ -140,31 +140,3 @@ jobs:
           echo "::error::Unexpected response from ${PREVIEW_URL}"
           printf '%s\n' "${response}"
           exit 1
-
-  cleanup:
-    runs-on: ubuntu-slim
-    if: github.event_name == 'schedule' || github.event.action == 'closed' || (github.event.action == 'unlabeled' && github.event.label.name == 'pullpreview')
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - uses: "./"
-        with:
-          admins: "@collaborators/push"
-          always_on: master,v6
-          app_path: ./examples/workflow-smoke
-          instance_type: micro
-          dns: toto.preview.run
-          max_domain_length: 30
-          proxy_tls: web:8080
-          registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
-          ttl: 1h
-        env:
-          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-      # # Uncomment the following if need to debug
-      # - name: Setup tmate session
-      #   if: always()
-      #   uses: mxschmitt/action-tmate@v3
-      #   timeout-minutes: 45
-      #   with:
-      #     limit-access-to-actor: true
