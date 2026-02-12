@@ -19,6 +19,8 @@ jobs:
   deploy_smoke_1:
     runs-on: ubuntu-slim
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    outputs:
+      live: ${{ steps.pullpreview.outputs.live }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
@@ -45,6 +47,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
 
       - name: Assert deploy v1 and DB seed state
+        if: steps.pullpreview.outputs.live == 'true'
         shell: bash
         env:
           PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}
@@ -77,7 +80,7 @@ jobs:
   deploy_smoke_2:
     runs-on: ubuntu-slim
     needs: deploy_smoke_1
-    if: needs.deploy_smoke_1.result == 'success'
+    if: needs.deploy_smoke_1.result == 'success' && needs.deploy_smoke_1.outputs.live == 'true'
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
@@ -112,6 +115,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
 
       - name: Assert deploy v2 and DB persistence
+        if: steps.pullpreview.outputs.live == 'true'
         shell: bash
         env:
           PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}

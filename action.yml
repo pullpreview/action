@@ -82,6 +82,9 @@ inputs:
     default: "infinite"
 
 outputs:
+  live:
+    description: "Whether this run produced a live preview deployment"
+    value: "${{ steps.pullpreview.outputs.live }}"
   url:
     description: "The URL of the application on the preview server"
     value: "${{ steps.pullpreview.outputs.url }}"
@@ -160,3 +163,9 @@ runs:
           --proxy-tls "${{ inputs.proxy_tls }}" \
           --pre-script "${{ inputs.pre_script }}" \
           --ttl "${{ inputs.ttl }}"
+
+        if grep -q '^url=' "${GITHUB_OUTPUT}"; then
+          echo "live=true" >> "${GITHUB_OUTPUT}"
+        else
+          echo "live=false" >> "${GITHUB_OUTPUT}"
+        fi
