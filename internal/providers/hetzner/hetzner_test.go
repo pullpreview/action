@@ -833,8 +833,9 @@ func (f *fakeHcloudClient) WaitFor(ctx context.Context, actions ...*hcloud.Actio
 
 func mustNewProviderWithContext(t *testing.T, cfg Config) *Provider {
 	t.Helper()
+	var err error
 	if cfg.CAKey == "" {
-		_, cfg.CAKey, err := mustGenerateSSHKeyPair()
+		_, cfg.CAKey, err = mustGenerateSSHKeyPair()
 		if err != nil {
 			t.Fatalf("failed to generate CA key: %v", err)
 		}
