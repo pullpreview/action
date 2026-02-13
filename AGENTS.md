@@ -55,7 +55,6 @@ Supported commands:
 
 ## GitHub sync behavior (`github-sync`)
 - Handles PR labeled/opened/reopened/synchronize/unlabeled/closed events.
-- Handles push events for `always_on` branches.
 - Handles scheduled cleanup of dangling labeled preview instances.
 - Updates marker-based PR status comments.
 - For `admins: "@collaborators/push"`:
