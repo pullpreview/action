@@ -155,15 +155,12 @@ on:
   # the schedule is optional, but helps to make sure no dangling resources are left when GitHub Action does not behave properly
   schedule:
     - cron: "30 2 * * *"
-  push:
-    branches:
-      - main
   pull_request:
     types: [labeled, unlabeled, synchronize, closed, reopened]
 
 jobs:
   deploy:
-    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -198,16 +195,13 @@ name: PullPreview
 on:
   schedule:
     - cron: "30 */4 * * *"
-  push:
-    branches:
-      - master
   pull_request:
     types: [labeled, unlabeled, synchronize, closed, reopened, opened]
 
 jobs:
   deploy_hetzner:
     runs-on: ubuntu-slim
-    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
