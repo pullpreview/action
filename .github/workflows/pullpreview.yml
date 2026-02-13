@@ -32,8 +32,6 @@ jobs:
           always_on: master,v6
           app_path: ./examples/workflow-smoke
           instance_type: micro
-          # only required if using custom domain for your preview environments
-          dns: preview.chunk.io
           max_domain_length: 30
           # Enable HTTPS preview URL through Caddy + Let's Encrypt.
           proxy_tls: web:8080
@@ -103,7 +101,6 @@ jobs:
           always_on: master,v6
           app_path: ./examples/workflow-smoke
           instance_type: micro
-          dns: preview.chunk.io
           max_domain_length: 30
           proxy_tls: web:8080
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
@@ -160,8 +157,8 @@ jobs:
           provider: hetzner
           region: ash
           image: ubuntu-24.04
+          dns: rev2.click
           instance_type: cpx21
-          dns: preview.chunk.io
           max_domain_length: 30
           # required here because the mysql image is private in GHCR
           registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
