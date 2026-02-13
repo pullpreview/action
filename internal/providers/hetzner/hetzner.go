@@ -26,6 +26,7 @@ import (
 )
 
 const (
+	// Hardcoded to a location with the highest server-type availability (snapshot: 2026-02-13).
 	defaultHetznerLocation    = "nbg1"
 	defaultHetznerImage       = "ubuntu-24.04"
 	defaultHetznerServerType  = "cpx21"
