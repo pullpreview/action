@@ -11,9 +11,11 @@ This repository ships a GitHub Action implemented in Go.
 ## Go Tooling
 - Go commands should be run via `mise` for toolchain consistency.
 - Examples:
+  - `make test`
+  - `make dist`
   - `mise exec -- go test ./...`
   - `mise exec -- go run ./cmd/pullpreview up examples/example-app`
-  - `make dist`
+- `make dist` builds the prebuilt Linux binary under `dist/` and auto-commits only that directory via the repo’s `dist-commit` target.
 - Dist workflow:
   - Commit source changes first.
   - Run `make dist` afterwards.
