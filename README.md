@@ -1,6 +1,6 @@
 # <img width="25" height="25" alt="pullpreview" src="https://github.com/user-attachments/assets/3aeb0f94-cac5-44b2-9f8e-abdb12be9cfe" /> PullPreview
 
-A GitHub Action that starts live environments for your pull requests and branches.
+A GitHub Action that starts live environments for your pull requests.
 
 [![pullpreview](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml/badge.svg)](https://github.com/pullpreview/action/actions/workflows/pullpreview.yml)
 <a href="https://news.ycombinator.com/item?id=23221471"><img src="https://img.shields.io/badge/Hacker%20News-83-%23FF6600" alt="Hacker News"></a>
@@ -8,14 +8,13 @@ A GitHub Action that starts live environments for your pull requests and branche
 ## Spin environments in one click
 
 Once installed in your repository, this action is triggered any time a change
-is made to Pull Requests labelled with the `pullpreview` label, or one of the
-_always-on_ branches.
+is made to Pull Requests labelled with the `pullpreview` label.
 
 When triggered, it will:
 
 1. Check out the repository code
 2. Provision a preview instance (Lightsail by default, or Hetzner with `provider: hetzner`), with docker and docker-compose set up
-3. Continuously deploy the specified pull requests and branches, using your docker-compose file(s)
+3. Continuously deploy the specified pull requests using your docker-compose file(s)
 4. Report the preview instance URL in the GitHub UI
 
 It is designed to be the **no-nonsense, cheap, and secure** alternative to
@@ -61,9 +60,7 @@ Preview environments that:
   docker-compose, it can be deployed to preview environments with PullPreview.
 
 - can be **started and destroyed easily**: You can manage preview environments
-  by adding or removing the `pullpreview` label on your Pull Requests. You can
-  set specific branches as always on, for instance to continuously deploy your
-  master branch.
+  by adding or removing the `pullpreview` label on your Pull Requests.
 
 - are **cheap too run**: Preview environments are launched on AWS Lightsail
   instances, which are both very cheap (10USD per month, proratized to the
@@ -110,7 +107,6 @@ All supported `with:` inputs from `action.yml`:
 | Input | Default | Description |
 | --- | --- | --- |
 | `app_path` | `.` | Path to your application containing Docker Compose files (relative to `${{ github.workspace }}`). |
-| `always_on` | `""` | Comma-separated branch names that should always be deployed. |
 | `dns` | `my.preview.run` | DNS suffix used for generated preview hostnames. Built-in alternatives: `rev1.click` through `rev9.click` (see note below). |
 | `max_domain_length` | `62` | Maximum generated FQDN length (cannot exceed 62 for Let's Encrypt). |
 | `label` | `pullpreview` | Label that triggers preview deployments. |
@@ -150,7 +146,7 @@ ssh-keygen -t rsa -b 3072 -m PEM -N "" -f hetzner_ca_key
 
 ## Example
 
-Workflow file with the `master` branch always on:
+Workflow file for pullpreview-driven deployments:
 
 ```yaml
 # .github/workflows/pullpreview.yml
@@ -176,8 +172,6 @@ jobs:
         with:
           # Those GitHub users will have SSH access to the servers
           admins: crohr,other-github-user
-          # A preview environment will always exist for the main branch
-          always_on: main
           # Use the cidrs option to restrict access to the live environments to specific IP ranges
           cidrs: "0.0.0.0/0"
           # PullPreview will use those 2 files when running docker-compose up
@@ -220,7 +214,6 @@ jobs:
       - uses: pullpreview/action@v6
         with:
           admins: "@collaborators/push"
-          always_on: master
           app_path: ./examples/workflow-smoke
           provider: hetzner
           # optional Hetzner runtime options

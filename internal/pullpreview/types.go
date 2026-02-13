@@ -112,7 +112,6 @@ type ListOptions struct {
 type GithubSyncOptions struct {
 	AppPath           string
 	Label             string
-	AlwaysOn          []string
 	DeploymentVariant string
 	TTL               string
 	Context           context.Context
