@@ -140,7 +140,7 @@ jobs:
           printf '%s\n' "${response}"
           exit 1
 
-  deploy_smoke_hetzner:
+      deploy_smoke_hetzner:
     runs-on: ubuntu-slim
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 35
@@ -166,3 +166,4 @@ jobs:
           ttl: 1h
         env:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
+          HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"

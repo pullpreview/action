@@ -33,6 +33,7 @@ const (
 	defaultHetznerSSHUser     = "root"
 	defaultHetznerSSHRetries  = 10
 	defaultHetznerSSHInterval = 15 * time.Second
+	defaultHetznerSSHCertTTL  = 12 * time.Hour
 	hetznerSSHKeyCacheExt     = "json"
 )
 
@@ -119,17 +120,24 @@ func (a hcloudClientAdapter) WaitFor(ctx context.Context, actions ...*hcloud.Act
 	return a.client.Action.WaitFor(ctx, actions...)
 }
 
-var runSSHCommand = func(ctx context.Context, keyFile, user, host string) ([]byte, error) {
+var runSSHCommand = func(ctx context.Context, keyFile, certFile, user, host string) ([]byte, error) {
 	args := []string{
 		"-o", "BatchMode=yes",
+		"-o", "IdentitiesOnly=yes",
+		"-o", "IdentityAgent=none",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
 		"-o", "ConnectTimeout=8",
 		"-i", keyFile,
+	}
+	if strings.TrimSpace(certFile) != "" {
+		args = append(args, "-o", fmt.Sprintf("CertificateFile=%s", certFile))
+	}
+	args = append(args,
 		fmt.Sprintf("%s@%s", user, host),
 		"echo", "ok",
-	}
+	)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	return cmd.CombinedOutput()
 }
@@ -138,6 +146,7 @@ type Config struct {
 	APIToken        string
 	Location        string
 	Image           string
+	CAKey           string
 	SSHUsername     string
 	SSHKeysCacheDir string
 }
@@ -162,6 +171,9 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.APIToken) == "" {
 		return fmt.Errorf("HCLOUD_TOKEN is required")
 	}
+	if strings.TrimSpace(c.CAKey) == "" {
+		return fmt.Errorf("HETZNER_CA_KEY is required")
+	}
 	if strings.TrimSpace(c.Location) == "" {
 		return fmt.Errorf("location is required")
 	}
@@ -181,14 +193,19 @@ func ParseConfigFromEnv(env map[string]string) (pullpreview.ProviderConfig, erro
 	if image == "" {
 		image = defaultHetznerImage
 	}
+	caKey := strings.TrimSpace(env["HETZNER_CA_KEY"])
 	sshUser := defaultHetznerSSHUser
 	sshKeysCacheDir := strings.TrimSpace(env["PULLPREVIEW_SSH_KEYS_CACHE_DIR"])
 	cfg := Config{
 		APIToken:        token,
 		Location:        location,
 		Image:           image,
+		CAKey:           caKey,
 		SSHUsername:     sshUser,
 		SSHKeysCacheDir: sshKeysCacheDir,
+	}
+	if _, _, err := parseHetznerCAKey(caKey); err != nil {
+		return cfg, err
 	}
 	return cfg, cfg.Validate()
 }
@@ -209,6 +226,8 @@ type Provider struct {
 	location        string
 	image           string
 	sshUser         string
+	caSigner        ssh.Signer
+	caPublicKey     string
 	sshKeysCacheDir string
 	logger          *pullpreview.Logger
 }
@@ -228,12 +247,18 @@ func newProviderWithContext(ctx context.Context, cfg Config, logger *pullpreview
 	if client == nil {
 		return nil, fmt.Errorf("client cannot be nil")
 	}
+	caSigner, caPublicKey, err := parseHetznerCAKey(cfg.CAKey)
+	if err != nil {
+		return nil, err
+	}
 	return &Provider{
 		client:          client,
 		ctx:             pullpreview.EnsureContext(ctx),
 		location:        cfg.Location,
 		image:           cfg.Image,
 		sshUser:         cfg.SSHUsername,
+		caSigner:        caSigner,
+		caPublicKey:     caPublicKey,
 		sshKeysCacheDir: cfg.SSHKeysCacheDir,
 		logger:          logger,
 	}, nil
@@ -331,6 +356,16 @@ func (p *Provider) BuildUserData(options pullpreview.UserDataOptions) (string, e
 		"mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready",
 		fmt.Sprintf("chown -R %s:%s /etc/pullpreview", options.Username, options.Username),
 	)
+	if strings.TrimSpace(p.caPublicKey) != "" {
+		lines = append(lines,
+			"mkdir -p /etc/ssh/sshd_config.d",
+			fmt.Sprintf("cat <<'EOF' > /etc/ssh/pullpreview-user-ca.pub\n%s\nEOF", p.caPublicKey),
+			"cat <<'EOF' > /etc/ssh/sshd_config.d/pullpreview.conf",
+			"TrustedUserCAKeys /etc/ssh/pullpreview-user-ca.pub",
+			"EOF",
+			"systemctl restart ssh || systemctl restart sshd || true",
+		)
+	}
 	return strings.Join(lines, "\n"), nil
 }
 
@@ -353,16 +388,6 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 		if err := p.ensureServerFirewallAttached(existing, firewalls); err != nil {
 			return pullpreview.AccessDetails{}, err
 		}
-		cached, ok := p.loadCachedSSHCredentials(name)
-		if !ok || strings.TrimSpace(cached.PrivateKey) == "" {
-			if p.logger != nil {
-				p.logger.Warnf("Existing Hetzner instance %q has no cached SSH private key; recreating instance", name)
-			}
-			if err := p.destroyInstanceAndCache(existing, name); err != nil {
-				return pullpreview.AccessDetails{}, err
-			}
-			continue
-		}
 		publicIP := p.publicIPAddress(existing)
 		if publicIP == "" {
 			if p.logger != nil {
@@ -373,16 +398,11 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 			}
 			continue
 		}
-		if err := validateSSHPrivateKeyFormat(strings.TrimSpace(cached.PrivateKey)); err != nil {
-			if p.logger != nil {
-				p.logger.Warnf("Cached SSH key for %q is invalid or unreadable; recreating instance", name)
-			}
-			if err := p.destroyInstanceAndCache(existing, name); err != nil {
-				return pullpreview.AccessDetails{}, err
-			}
-			continue
+		privateKey, certKey, err := p.generateSignedAccessCredentials()
+		if err != nil {
+			return pullpreview.AccessDetails{}, err
 		}
-		if err := p.validateSSHAccessWithRetry(existing, strings.TrimSpace(cached.PrivateKey), defaultHetznerSSHRetries); err != nil {
+		if err := p.validateSSHAccessWithRetry(existing, privateKey, certKey, defaultHetznerSSHRetries); err != nil {
 			if p.logger != nil {
 				p.logger.Warnf("Existing Hetzner instance %q SSH check failed; recreating instance (%v)", name, err)
 			}
@@ -392,12 +412,13 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 			continue
 		}
 		if p.logger != nil {
-			p.logger.Infof("Reusing existing Hetzner server %s and cached SSH key", name)
+			p.logger.Infof("Reusing existing Hetzner server %s with cert-based SSH credentials", name)
 		}
 		return pullpreview.AccessDetails{
 			Username:   p.sshUser,
 			IPAddress:  publicIP,
-			PrivateKey: strings.TrimSpace(cached.PrivateKey),
+			PrivateKey: strings.TrimSpace(privateKey),
+			CertKey:    strings.TrimSpace(certKey),
 		}, nil
 	}
 }
@@ -464,17 +485,15 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 	if publicIP == "" {
 		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, fmt.Errorf("created server missing public IP"))
 	}
-	if err := p.validateSSHAccessWithRetry(server, privateKey, defaultHetznerSSHRetries); err != nil {
+	if err := p.validateSSHAccessWithRetry(server, privateKey, "", defaultHetznerSSHRetries); err != nil {
 		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, err)
 	}
-	if err := p.saveCachedSSHCredentials(name, cachedHetznerSSHCredentials{
-		InstanceName: name,
-		PrivateKey:   privateKey,
-		PublicKey:    publicKey,
-		SSHKeyID:     sshKey.ID,
-		SSHKeyName:   keyName,
-	}); err != nil && p.logger != nil {
-		p.logger.Warnf("Unable to cache Hetzner SSH credentials for %s: %v", name, err)
+	if err := p.deleteCloudSSHKeyIfExists(sshKey); err != nil && p.logger != nil {
+		p.logger.Warnf("Unable to delete temporary Hetzner SSH key %s: %v", keyName, err)
+	}
+	certPrivateKey, cert, err := p.generateSignedAccessCredentials()
+	if err != nil {
+		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, nil, server, err)
 	}
 	if p.logger != nil {
 		p.logger.Infof("Created Hetzner server %s with SSH key %s", server.Name, keyName)
@@ -482,17 +501,18 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 	return pullpreview.AccessDetails{
 		Username:   p.sshUser,
 		IPAddress:  publicIP,
-		PrivateKey: privateKey,
+		PrivateKey: certPrivateKey,
+		CertKey:    cert,
 	}, nil
 }
 
-func (p *Provider) validateSSHAccessWithRetry(server *hcloud.Server, privateKey string, attempts int) error {
+func (p *Provider) validateSSHAccessWithRetry(server *hcloud.Server, privateKey, certKey string, attempts int) error {
 	if attempts <= 0 {
 		attempts = 1
 	}
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		if err := p.validateSSHAccess(server, privateKey); err == nil {
+		if err := p.validateSSHAccess(server, privateKey, certKey); err == nil {
 			return nil
 		} else {
 			lastErr = err
@@ -732,7 +752,7 @@ func (p *Provider) destroyInstanceAndCache(server *hcloud.Server, name string) e
 	return nil
 }
 
-func (p *Provider) validateSSHAccess(server *hcloud.Server, privateKey string) error {
+func (p *Provider) validateSSHAccess(server *hcloud.Server, privateKey, certKey string) error {
 	privateKey = strings.TrimSpace(privateKey)
 	if privateKey == "" {
 		return fmt.Errorf("empty private key")
@@ -757,9 +777,18 @@ func (p *Provider) validateSSHAccess(server *hcloud.Server, privateKey string) e
 		_ = os.Remove(keyFile.Name())
 		return err
 	}
+	certFile := ""
+	if strings.TrimSpace(certKey) != "" {
+		certFile = keyFile.Name() + "-cert.pub"
+		if err := os.WriteFile(certFile, []byte(strings.TrimSpace(certKey)+"\n"), 0600); err != nil {
+			_ = os.Remove(keyFile.Name())
+			return err
+		}
+		defer os.Remove(certFile)
+	}
 	defer os.Remove(keyFile.Name())
 
-	output, err := runSSHCommand(p.ctx, keyFile.Name(), p.sshUser, publicIP)
+	output, err := runSSHCommand(p.ctx, keyFile.Name(), certFile, p.sshUser, publicIP)
 	if err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
 	}
@@ -776,6 +805,69 @@ func validateSSHPrivateKeyFormat(privateKey string) error {
 		return fmt.Errorf("invalid cached SSH private key: %w", err)
 	}
 	return nil
+}
+
+func (p *Provider) generateSignedAccessCredentials() (string, string, error) {
+	_, privateKey, signer, err := generateSSHKeyPairWithSigner("pullpreview")
+	if err != nil {
+		return "", "", err
+	}
+	cert, err := generateUserCertificate(p.caSigner, signer, p.sshUser, defaultHetznerSSHCertTTL)
+	if err != nil {
+		return "", "", err
+	}
+	return privateKey, cert, nil
+}
+
+func generateUserCertificate(caSigner ssh.Signer, userSigner ssh.Signer, principal string, ttl time.Duration) (string, error) {
+	if caSigner == nil {
+		return "", fmt.Errorf("missing CA signer")
+	}
+	if userSigner == nil {
+		return "", fmt.Errorf("missing user signer")
+	}
+	publicKey := userSigner.PublicKey()
+	if publicKey == nil {
+		return "", fmt.Errorf("user signer has no public key")
+	}
+	cert := &ssh.Certificate{
+		Key:             publicKey,
+		Serial:          uint64(time.Now().UnixNano()),
+		CertType:        ssh.UserCert,
+		KeyId:           fmt.Sprintf("pullpreview-%s-%d", sanitizeNameForHetzner(principal), time.Now().UnixNano()),
+		ValidPrincipals: []string{principal},
+		ValidAfter:      uint64(time.Now().Add(-time.Minute).Unix()),
+		ValidBefore:     uint64(time.Now().Add(ttl).Unix()),
+	}
+	if err := cert.SignCert(rand.Reader, caSigner); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(cert))), nil
+}
+
+func parseHetznerCAKey(raw string) (ssh.Signer, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, "", fmt.Errorf("HETZNER_CA_KEY is required")
+	}
+
+	data := []byte(raw)
+	if info, err := os.Stat(raw); err == nil && !info.IsDir() {
+		data, err = os.ReadFile(raw)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to read HETZNER_CA_KEY from %q: %w", raw, err)
+		}
+	}
+
+	signer, err := ssh.ParsePrivateKey(data)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid HETZNER_CA_KEY: %w", err)
+	}
+	publicKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
+	if publicKey == "" {
+		return nil, "", fmt.Errorf("invalid HETZNER_CA_KEY: unable to derive public key")
+	}
+	return signer, publicKey, nil
 }
 
 func (p *Provider) cachePath(name string) string {
@@ -925,22 +1017,34 @@ func (p *Provider) serverByName(name string) (*hcloud.Server, error) {
 }
 
 func generateSSHKeyPair(_ string) (string, string, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	public, private, _, err := generateSSHKeyPairWithSigner("")
 	if err != nil {
 		return "", "", err
+	}
+	return public, private, nil
+}
+
+func generateSSHKeyPairWithSigner(_ string) (string, string, ssh.Signer, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", nil, err
 	}
 	private := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	})
 	if private == nil {
-		return "", "", fmt.Errorf("unable to marshal private key")
+		return "", "", nil, fmt.Errorf("unable to marshal private key")
 	}
 	public, err := ssh.NewPublicKey(&key.PublicKey)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(public))), string(private), nil
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(public))), strings.TrimSpace(string(private)), signer, nil
 }
 
 func parseFirewallRules(ports, cidrs []string) ([]hcloud.FirewallRule, error) {

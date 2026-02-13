@@ -14,10 +14,15 @@ import (
 )
 
 func TestParseConfigFromEnv(t *testing.T) {
+	_, caKey, err := mustGenerateSSHKeyPair()
+	if err != nil {
+		t.Fatalf("failed to generate ca key: %v", err)
+	}
 	cfgRaw, err := ParseConfigFromEnv(map[string]string{
-		"HCLOUD_TOKEN": "abc",
-		"REGION":       "fra1",
-		"IMAGE":        "debian-12",
+		"HCLOUD_TOKEN":   "abc",
+		"REGION":         "fra1",
+		"IMAGE":          "debian-12",
+		"HETZNER_CA_KEY": caKey,
 	})
 	if err != nil {
 		t.Fatalf("ParseConfigFromEnv() error: %v", err)
@@ -26,23 +31,40 @@ func TestParseConfigFromEnv(t *testing.T) {
 	if cfg.APIToken != "abc" {
 		t.Fatalf("token = %q, want %q", cfg.APIToken, "abc")
 	}
-	if cfg.Location != "fra1" || cfg.Image != "debian-12" || cfg.SSHUsername != defaultHetznerSSHUser {
+	if cfg.Location != "fra1" || cfg.Image != "debian-12" || cfg.CAKey != caKey || cfg.SSHUsername != defaultHetznerSSHUser {
 		t.Fatalf("unexpected parsed config: %#v", cfg)
 	}
 
-	cfgRaw, err = ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback"})
+	caKeyFile := filepath.Join(t.TempDir(), "hetzner-ca.key")
+	if err := os.WriteFile(caKeyFile, []byte(caKey), 0600); err != nil {
+		t.Fatalf("failed to write CA key file: %v", err)
+	}
+	cfgRaw, err = ParseConfigFromEnv(map[string]string{
+		"HCLOUD_TOKEN":   "fallback",
+		"HETZNER_CA_KEY": caKeyFile,
+	})
 	if err != nil {
-		t.Fatalf("ParseConfigFromEnv() error: %v", err)
+		t.Fatalf("ParseConfigFromEnv() with file path error: %v", err)
 	}
 	cfg = cfgRaw.(Config)
 	if cfg.APIToken != "fallback" {
 		t.Fatalf("unexpected token value: %q", cfg.APIToken)
 	}
-	if cfg.Location != defaultHetznerLocation || cfg.Image != defaultHetznerImage || cfg.SSHUsername != defaultHetznerSSHUser {
-		t.Fatalf("expected defaults, got %#v", cfg)
+	if cfg.Location != defaultHetznerLocation || cfg.Image != defaultHetznerImage || cfg.CAKey != caKeyFile || cfg.SSHUsername != defaultHetznerSSHUser {
+		t.Fatalf("expected defaults and file-backed CA key path, got %#v", cfg)
 	}
-	if _, err := ParseConfigFromEnv(map[string]string{}); err == nil {
+
+	if _, err := ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback", "HETZNER_CA_KEY": ""}); err == nil {
+		t.Fatalf("expected missing CA key error")
+	}
+	if _, err := ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback"}); err == nil {
+		t.Fatalf("expected missing CA key error")
+	}
+	if _, err := ParseConfigFromEnv(map[string]string{"HETZNER_CA_KEY": caKey}); err == nil {
 		t.Fatalf("expected missing token error")
+	}
+	if _, err := ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback", "HETZNER_CA_KEY": "not-a-key"}); err == nil {
+		t.Fatalf("expected invalid CA key error")
 	}
 }
 
@@ -86,6 +108,15 @@ func TestBuildUserDataBranchesAndPaths(t *testing.T) {
 	}
 	if !strings.Contains(script, "echo 'ssh-ed25519 AAA\nssh-rsa BBB' >> /home/ec2-user/.ssh/authorized_keys") {
 		t.Fatalf("missing authorized_keys injection: %s", script)
+	}
+	if !strings.Contains(script, "cat <<'EOF' > /etc/ssh/pullpreview-user-ca.pub") {
+		t.Fatalf("missing pullpreview user CA key install step: %s", script)
+	}
+	if !strings.Contains(script, "TrustedUserCAKeys /etc/ssh/pullpreview-user-ca.pub") {
+		t.Fatalf("missing TrustedUserCAKeys directive: %s", script)
+	}
+	if !strings.Contains(script, "systemctl restart ssh || systemctl restart sshd || true") {
+		t.Fatalf("missing SSH restart for CA trust config: %s", script)
 	}
 
 	noKeyScript, err := p.BuildUserData(pullpreview.UserDataOptions{
@@ -400,165 +431,122 @@ func TestHetznerLabelSanitizationAndListMatching(t *testing.T) {
 	}
 }
 
-func TestHetznerLaunchLifecycleRecreateWhenCacheMissing(t *testing.T) {
-	cacheDir := t.TempDir()
+func TestHetznerLaunchLifecycleReusesExistingServerWithCert(t *testing.T) {
 	provider := mustNewProviderWithContext(t, Config{
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
 		SSHUsername:     defaultHetznerSSHUser,
-		SSHKeysCacheDir: cacheDir,
+		SSHKeysCacheDir: t.TempDir(),
 	})
-
 	existing := makeTestServer("gh-1-pr-1", "198.51.100.1", hcloud.ServerStatusRunning, nil)
-	created := makeTestServer("gh-1-pr-1", "203.0.113.10", hcloud.ServerStatusRunning, nil)
-	key := makeTestSSHKey(1)
 	client := &fakeHcloudClient{
-		serverListResponses: [][]*hcloud.Server{{
-			existing,
-		}, nil},
-		sshKeyCreateResult: key,
-		serverCreateResult: hcloud.ServerCreateResult{
-			Server: created,
-		},
+		serverListResponses: [][]*hcloud.Server{{existing}},
 	}
 	provider.client = client
+	originalRunSSHCommand := runSSHCommand
+	defer func() { runSSHCommand = originalRunSSHCommand }()
+	runSSHCommand = func(context.Context, string, string, string, string) ([]byte, error) {
+		return []byte("ok"), nil
+	}
 
 	access, err := provider.Launch("gh-1-pr-1", pullpreview.LaunchOptions{})
 	if err != nil {
 		t.Fatalf("Launch() error: %v", err)
 	}
-	if access.IPAddress != created.PublicNet.IPv4.IP.String() {
+	if access.IPAddress != existing.PublicNet.IPv4.IP.String() {
 		t.Fatalf("unexpected access ip: %#v", access.IPAddress)
+	}
+	if access.CertKey == "" {
+		t.Fatalf("expected cert key in reused access details")
+	}
+	if client.serverListCalls != 1 {
+		t.Fatalf("expected one server list call, got %d", client.serverListCalls)
+	}
+	if client.serverDeleteCalls != 0 {
+		t.Fatalf("expected no delete calls, got %d", client.serverDeleteCalls)
+	}
+	if client.serverCreateCalls != 0 {
+		t.Fatalf("expected no create calls, got %d", client.serverCreateCalls)
+	}
+}
+
+func TestHetznerLaunchLifecycleRecreateWhenCacheMissing(t *testing.T) {
+	provider := mustNewProviderWithContext(t, Config{
+		APIToken:        "token",
+		Location:        defaultHetznerLocation,
+		Image:           defaultHetznerImage,
+		SSHUsername:     defaultHetznerSSHUser,
+		SSHKeysCacheDir: t.TempDir(),
+	})
+	instance := "gh-1-pr-1"
+	existing := makeTestServer(instance, "198.51.100.1", hcloud.ServerStatusRunning, nil)
+	created := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
+	client := &fakeHcloudClient{
+		serverListResponses: [][]*hcloud.Server{{existing}, nil},
+		sshKeyCreateResult:  mustTestSSHKey(1),
+		serverCreateResult:  hcloud.ServerCreateResult{Server: created},
+	}
+	provider.client = client
+	originalRunSSHCommand := runSSHCommand
+	defer func() { runSSHCommand = originalRunSSHCommand }()
+	runSSHCommand = func(_ context.Context, _ string, certFile string, _ string, _ string) ([]byte, error) {
+		if strings.TrimSpace(certFile) != "" {
+			return nil, fmt.Errorf("ssh unavailable")
+		}
+		return []byte("ok"), nil
+	}
+
+	_, err := provider.Launch(instance, pullpreview.LaunchOptions{})
+	if err != nil {
+		t.Fatalf("Launch() error: %v", err)
 	}
 	if client.serverListCalls != 2 {
 		t.Fatalf("expected two server list calls, got %d", client.serverListCalls)
 	}
 	if client.serverDeleteCalls != 1 {
-		t.Fatalf("expected one delete call for recreate path, got %d", client.serverDeleteCalls)
+		t.Fatalf("expected one delete call for SSH precheck failure, got %d", client.serverDeleteCalls)
 	}
 	if client.serverCreateCalls != 1 {
-		t.Fatalf("expected one create call, got %d", client.serverCreateCalls)
-	}
-}
-
-func TestHetznerLaunchLifecycleRecreateWhenCacheInvalid(t *testing.T) {
-	cacheDir := t.TempDir()
-	provider := mustNewProviderWithContext(t, Config{
-		APIToken:        "token",
-		Location:        defaultHetznerLocation,
-		Image:           defaultHetznerImage,
-		SSHUsername:     defaultHetznerSSHUser,
-		SSHKeysCacheDir: cacheDir,
-	})
-	instance := "gh-1-pr-1"
-	existing := makeTestServer(instance, "198.51.100.1", hcloud.ServerStatusRunning, nil)
-	created := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
-	key := makeTestSSHKey(1)
-	client := &fakeHcloudClient{
-		serverListResponses: [][]*hcloud.Server{{existing}, nil},
-		sshKeyCreateResult:  key,
-		serverCreateResult:  hcloud.ServerCreateResult{Server: created},
-	}
-	provider.client = client
-	if err := provider.saveCachedSSHCredentials(instance, cachedHetznerSSHCredentials{
-		InstanceName: instance,
-		PrivateKey:   "invalid",
-	}); err != nil {
-		t.Fatalf("setup cache: %v", err)
-	}
-
-	_, err := provider.Launch(instance, pullpreview.LaunchOptions{})
-	if err != nil {
-		t.Fatalf("Launch() error: %v", err)
-	}
-	if client.serverDeleteCalls != 1 {
-		t.Fatalf("expected one delete call for invalid cache path, got %d", client.serverDeleteCalls)
-	}
-	if client.serverCreateCalls != 1 {
-		t.Fatalf("expected one create call for invalid cache path, got %d", client.serverCreateCalls)
+		t.Fatalf("expected one create call for SSH precheck failure, got %d", client.serverCreateCalls)
 	}
 }
 
 func TestHetznerLaunchLifecycleRecreateWhenPublicIPMissing(t *testing.T) {
-	cacheDir := t.TempDir()
 	provider := mustNewProviderWithContext(t, Config{
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
 		SSHUsername:     defaultHetznerSSHUser,
-		SSHKeysCacheDir: cacheDir,
+		SSHKeysCacheDir: t.TempDir(),
 	})
 	instance := "gh-1-pr-1"
-	existing := &hcloud.Server{Name: instance, Status: hcloud.ServerStatusRunning}
+	existing := makeTestServer(instance, "", hcloud.ServerStatusRunning, nil)
 	created := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
-	key := makeTestSSHKey(1)
 	client := &fakeHcloudClient{
 		serverListResponses: [][]*hcloud.Server{{existing}, nil},
-		sshKeyCreateResult:  key,
+		sshKeyCreateResult:  mustTestSSHKey(12),
 		serverCreateResult:  hcloud.ServerCreateResult{Server: created},
 	}
 	provider.client = client
-	_, private, _ := mustGenerateSSHKeyPair()
-	if err := provider.saveCachedSSHCredentials(instance, cachedHetznerSSHCredentials{
-		InstanceName: instance,
-		PrivateKey:   private,
-	}); err != nil {
-		t.Fatalf("setup cache: %v", err)
+	originalRunSSHCommand := runSSHCommand
+	defer func() { runSSHCommand = originalRunSSHCommand }()
+	runSSHCommand = func(context.Context, string, string, string, string) ([]byte, error) {
+		return []byte("ok"), nil
 	}
 
-	_, err := provider.Launch(instance, pullpreview.LaunchOptions{})
+	_, err := provider.Launch(instance, pullpreview.LaunchOptions{UserData: "userdata"})
 	if err != nil {
 		t.Fatalf("Launch() error: %v", err)
+	}
+	if client.serverListCalls != 2 {
+		t.Fatalf("expected two server list calls, got %d", client.serverListCalls)
 	}
 	if client.serverDeleteCalls != 1 {
 		t.Fatalf("expected one delete call when public IP missing, got %d", client.serverDeleteCalls)
 	}
 	if client.serverCreateCalls != 1 {
 		t.Fatalf("expected one create call when public IP missing, got %d", client.serverCreateCalls)
-	}
-}
-
-func TestHetznerLaunchLifecycleRecreateWhenSSHPrecheckFails(t *testing.T) {
-	cacheDir := t.TempDir()
-	provider := mustNewProviderWithContext(t, Config{
-		APIToken:        "token",
-		Location:        defaultHetznerLocation,
-		Image:           defaultHetznerImage,
-		SSHUsername:     defaultHetznerSSHUser,
-		SSHKeysCacheDir: cacheDir,
-	})
-	instance := "gh-1-pr-1"
-	_, private, _ := mustGenerateSSHKeyPair()
-	existing := makeTestServer(instance, "198.51.100.1", hcloud.ServerStatusRunning, nil)
-	created := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
-	client := &fakeHcloudClient{
-		serverListResponses: [][]*hcloud.Server{{existing}, nil},
-		serverCreateResult:  hcloud.ServerCreateResult{Server: created},
-		sshKeyCreateResult:  mustTestSSHKey(12),
-	}
-	provider.client = client
-	if err := provider.saveCachedSSHCredentials(instance, cachedHetznerSSHCredentials{
-		InstanceName: instance,
-		PrivateKey:   private,
-	}); err != nil {
-		t.Fatalf("setup cache: %v", err)
-	}
-	originalRunSSHCommand := runSSHCommand
-	defer func() { runSSHCommand = originalRunSSHCommand }()
-	runSSHCommand = func(context.Context, string, string, string) ([]byte, error) {
-		return nil, fmt.Errorf("ssh unavailable")
-	}
-
-	_, err := provider.Launch(instance, pullpreview.LaunchOptions{})
-	if err != nil {
-		t.Fatalf("Launch() error: %v", err)
-	}
-	if client.serverDeleteCalls != 1 {
-		t.Fatalf("expected one delete call on SSH precheck failure, got %d", client.serverDeleteCalls)
-	}
-	if client.serverCreateCalls != 1 {
-		t.Fatalf("expected one create call on SSH precheck failure, got %d", client.serverCreateCalls)
 	}
 }
 
@@ -582,7 +570,7 @@ func TestHetznerCreateLifecycleRecreateWhenSSHPrecheckFails(t *testing.T) {
 
 	originalRunSSHCommand := runSSHCommand
 	defer func() { runSSHCommand = originalRunSSHCommand }()
-	runSSHCommand = func(context.Context, string, string, string) ([]byte, error) {
+	runSSHCommand = func(context.Context, string, string, string, string) ([]byte, error) {
 		return nil, fmt.Errorf("ssh unavailable")
 	}
 
@@ -845,6 +833,12 @@ func (f *fakeHcloudClient) WaitFor(ctx context.Context, actions ...*hcloud.Actio
 
 func mustNewProviderWithContext(t *testing.T, cfg Config) *Provider {
 	t.Helper()
+	if cfg.CAKey == "" {
+		_, cfg.CAKey, err := mustGenerateSSHKeyPair()
+		if err != nil {
+			t.Fatalf("failed to generate CA key: %v", err)
+		}
+	}
 	p, err := newProviderWithContext(context.Background(), cfg, nil, &fakeHcloudClient{})
 	if err != nil {
 		t.Fatalf("failed to build test provider: %v", err)
