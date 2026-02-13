@@ -15,9 +15,9 @@ func TestUserDataScriptIncludesExpectedCommands(t *testing.T) {
 	checks := []string{
 		"#!/bin/bash",
 		"echo 'ssh-ed25519 AAA\nssh-rsa BBB' > /home/ec2-user/.ssh/authorized_keys",
-		"mkdir -p /app && chown -R ec2-user.ec2-user /app",
+		"mkdir -p /app && chown -R ec2-user:ec2-user /app",
 		"yum install -y docker",
-		"touch /etc/pullpreview/ready",
+		"mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R ec2-user:ec2-user /etc/pullpreview",
 	}
 	for _, fragment := range checks {
 		if !strings.Contains(script, fragment) {
@@ -33,5 +33,29 @@ func TestUserDataScriptWithoutSSHKeys(t *testing.T) {
 	}.Script()
 	if strings.Contains(script, "authorized_keys") {
 		t.Fatalf("did not expect authorized_keys setup without keys, script:\n%s", script)
+	}
+}
+
+func TestUserDataScriptRootUserAndAppPaths(t *testing.T) {
+	script := UserData{
+		AppPath:  "/app",
+		Username: "root",
+	}.Script()
+	if !strings.Contains(script, "mkdir -p /app && chown -R root:root /app") {
+		t.Fatalf("expected root app path in script:\n%s", script)
+	}
+	if strings.Contains(script, "authorized_keys") {
+		t.Fatalf("did not expect authorized_keys setup without keys, script:\n%s", script)
+	}
+}
+
+func TestUserDataScriptRootUserAndSSHKeys(t *testing.T) {
+	script := UserData{
+		AppPath:       "/app",
+		Username:      "root",
+		SSHPublicKeys: []string{"ssh-ed25519 ROOT"},
+	}.Script()
+	if !strings.Contains(script, "echo 'ssh-ed25519 ROOT' > /root/.ssh/authorized_keys") {
+		t.Fatalf("expected root authorized_keys setup in script:\n%s", script)
 	}
 }

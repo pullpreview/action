@@ -670,6 +670,140 @@ func TestClearDanglingDeploymentsWithoutVariantSkipsVariantInstances(t *testing.
 	}
 }
 
+func TestParsePullPreviewInstanceName(t *testing.T) {
+	cases := []struct {
+		name   string
+		want   parsedInstanceName
+		wantOK bool
+	}{
+		{
+			name:   "gh-1-pr-42",
+			want:   parsedInstanceName{Variant: "", PRNumber: "42"},
+			wantOK: true,
+		},
+		{
+			name:   "gh-12-env-pr-3",
+			want:   parsedInstanceName{Variant: "env", PRNumber: "3"},
+			wantOK: true,
+		},
+		{
+			name:   "gh-1-prod-branch-feature",
+			want:   parsedInstanceName{Variant: "prod", Branch: "feature"},
+			wantOK: true,
+		},
+		{
+			name:   "gh-1-branch-main",
+			want:   parsedInstanceName{Variant: "", Branch: "main"},
+			wantOK: true,
+		},
+		{
+			name:   "gh-1-abcdef-pr-10",
+			wantOK: false,
+		},
+		{
+			name:   "invalid-format",
+			wantOK: false,
+		},
+	}
+
+	for _, c := range cases {
+		got, ok := parsePullPreviewInstanceName(c.name)
+		if ok != c.wantOK {
+			t.Fatalf("parsePullPreviewInstanceName(%q) ok=%v want=%v", c.name, ok, c.wantOK)
+		}
+		if !c.wantOK {
+			continue
+		}
+		if got != c.want {
+			t.Fatalf("parsePullPreviewInstanceName(%q) = %#v, want %#v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestCleanupInstanceReferencePrecedence(t *testing.T) {
+	ref, ok := cleanupInstanceReference(InstanceSummary{
+		Name: "gh-1-branch-main",
+		Tags: map[string]string{
+			"pr_number":          "12",
+			"pullpreview_branch": "main",
+		},
+	})
+	if !ok || ref.PRNumber != "12" {
+		t.Fatalf("expected PR tag to win over branch tags, got %#v ok=%v", ref, ok)
+	}
+
+	ref, ok = cleanupInstanceReference(InstanceSummary{
+		Name: "gh-1-pr-10",
+		Tags: map[string]string{
+			"branch":      "main",
+			"pullpreview": "ignored",
+		},
+	})
+	if !ok || ref.Branch != "main" || ref.BranchNormalized != NormalizeName("main") {
+		t.Fatalf("expected pullpreview branch fallback to explicit branch tag: %#v ok=%v", ref, ok)
+	}
+
+	ref, ok = cleanupInstanceReference(InstanceSummary{
+		Name: "gh-1-branch-feature",
+		Tags: map[string]string{
+			"pullpreview_branch": "feature-x",
+		},
+	})
+	if !ok || ref.Branch != "feature-x" || ref.BranchNormalized != NormalizeName("feature-x") {
+		t.Fatalf("expected branch tag to be used: %#v ok=%v", ref, ok)
+	}
+
+	ref, ok = cleanupInstanceReference(InstanceSummary{
+		Name: "gh-1-env-branch-feature",
+		Tags: map[string]string{},
+	})
+	if !ok || ref.PRNumber != "" || ref.Branch != "feature" || ref.BranchNormalized != "feature" {
+		t.Fatalf("expected name parsing fallback: %#v ok=%v", ref, ok)
+	}
+
+	_, ok = cleanupInstanceReference(InstanceSummary{Name: "bad-instance-name"})
+	if ok {
+		t.Fatalf("expected fallback parse to fail for unknown naming")
+	}
+}
+
+func TestInstanceMatchesCleanupVariantPrecedence(t *testing.T) {
+	if !instanceMatchesCleanupVariant(InstanceSummary{
+		Name: "gh-1-prod-pr-10",
+		Tags: map[string]string{"pullpreview_variant": "prod"},
+	}, "prod") {
+		t.Fatalf("expected variant tag match")
+	}
+
+	if instanceMatchesCleanupVariant(InstanceSummary{
+		Name: "gh-1-prod-pr-10",
+		Tags: map[string]string{"pullpreview_variant": "other"},
+	}, "prod") {
+		t.Fatalf("expected mismatched variant tag to lose")
+	}
+
+	if !instanceMatchesCleanupVariant(InstanceSummary{
+		Name: "gh-1-dev-pr-10",
+		Tags: map[string]string{},
+	}, "dev") {
+		t.Fatalf("expected parsed fallback variant to match")
+	}
+
+	if instanceMatchesCleanupVariant(InstanceSummary{
+		Name: "gh-1-dev-pr-10",
+		Tags: map[string]string{},
+	}, "") {
+		t.Fatalf("expected non-empty parsed variant to fail with empty variant filter")
+	}
+
+	if !instanceMatchesCleanupVariant(InstanceSummary{
+		Name: "gh-1-branch-main",
+		Tags: map[string]string{},
+	}, "") {
+		t.Fatalf("expected parsed non-pr branch instance without variant to match empty filter")
+	}
+}
+
 func writeFixtureToTempEventFile(t *testing.T, event GitHubEvent) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "event.json")

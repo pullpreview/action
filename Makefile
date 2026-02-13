@@ -1,4 +1,5 @@
 GO ?= mise exec -- go
+GO_TEST ?= $(GO) test ./internal/providers ./internal/pullpreview ./internal/providers/hetzner
 DIST_DIR := dist
 BIN_NAME := pullpreview
 GO_LDFLAGS ?= -s -w
@@ -74,4 +75,4 @@ rewrite:
 	echo "Rewrite complete. Force-push with: git push --force-with-lease origin $$current_branch"
 
 test:
-	$(GO) test ./...
+	$(GO_TEST)

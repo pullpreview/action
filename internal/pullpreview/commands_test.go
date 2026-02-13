@@ -44,6 +44,17 @@ func TestRunDownNormalizesInstanceName(t *testing.T) {
 	}
 }
 
+func TestRunDownSupportsContextName(t *testing.T) {
+	spy := &providerSpy{}
+	err := RunDown(DownOptions{Name: "pullpreview-local-example-app-1770972137766210000"}, spy, nil)
+	if err != nil {
+		t.Fatalf("RunDown() error: %v", err)
+	}
+	if spy.terminatedName != "local-example-app" {
+		t.Fatalf("unexpected terminated name from context input: %q", spy.terminatedName)
+	}
+}
+
 func TestRunListValidatesInput(t *testing.T) {
 	spy := &providerSpy{}
 	err := RunList(ListOptions{}, spy, nil)
