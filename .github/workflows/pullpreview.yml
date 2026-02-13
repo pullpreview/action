@@ -161,7 +161,7 @@ jobs:
           always_on: master,v6
           app_path: ./examples/workflow-smoke
           provider: hetzner
-          region: nbg1
+          region: ash
           image: ubuntu-24.04
           instance_type: cpx21
           dns: preview.chunk.io
