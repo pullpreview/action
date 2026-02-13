@@ -135,7 +135,6 @@ type Config struct {
 	APIToken        string
 	Location        string
 	Image           string
-	ServerType      string
 	SSHUsername     string
 	SSHKeysCacheDir string
 }
@@ -158,7 +157,7 @@ func (c Config) ProviderDisplayName() string {
 
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.APIToken) == "" {
-		return fmt.Errorf("HCLOUD_TOKEN (or HETZNER_API_TOKEN) is required")
+		return fmt.Errorf("HCLOUD_TOKEN is required")
 	}
 	if strings.TrimSpace(c.Location) == "" {
 		return fmt.Errorf("location is required")
@@ -166,43 +165,39 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Image) == "" {
 		return fmt.Errorf("image is required")
 	}
-	if strings.TrimSpace(c.ServerType) == "" {
-		return fmt.Errorf("server type is required")
-	}
 	return nil
 }
 
 func ParseConfigFromEnv(env map[string]string) (pullpreview.ProviderConfig, error) {
 	token := strings.TrimSpace(env["HCLOUD_TOKEN"])
-	if token == "" {
-		token = strings.TrimSpace(env["HETZNER_API_TOKEN"])
-	}
-	location := strings.TrimSpace(env["HETZNER_LOCATION"])
+	location := strings.TrimSpace(env["REGION"])
 	if location == "" {
 		location = defaultHetznerLocation
 	}
-	image := strings.TrimSpace(env["HETZNER_IMAGE"])
+	image := strings.TrimSpace(env["IMAGE"])
 	if image == "" {
 		image = defaultHetznerImage
 	}
-	serverType := strings.TrimSpace(env["HETZNER_SERVER_TYPE"])
-	if serverType == "" {
-		serverType = defaultHetznerServerType
-	}
-	sshUser := strings.TrimSpace(env["HETZNER_USERNAME"])
-	if sshUser == "" {
-		sshUser = defaultHetznerSSHUser
-	}
+	sshUser := defaultHetznerSSHUser
 	sshKeysCacheDir := strings.TrimSpace(env["PULLPREVIEW_SSH_KEYS_CACHE_DIR"])
 	cfg := Config{
 		APIToken:        token,
 		Location:        location,
 		Image:           image,
-		ServerType:      serverType,
 		SSHUsername:     sshUser,
 		SSHKeysCacheDir: sshKeysCacheDir,
 	}
 	return cfg, cfg.Validate()
+}
+
+func resolveHetznerServerType(raw string) string {
+	size := strings.TrimSpace(strings.ToLower(raw))
+	switch size {
+	case "", "small", "micro":
+		return defaultHetznerServerType
+	default:
+		return size
+	}
 }
 
 type Provider struct {
@@ -210,7 +205,6 @@ type Provider struct {
 	ctx             context.Context
 	location        string
 	image           string
-	serverType      string
 	sshUser         string
 	sshKeysCacheDir string
 	logger          *pullpreview.Logger
@@ -236,7 +230,6 @@ func newProviderWithContext(ctx context.Context, cfg Config, logger *pullpreview
 		ctx:             pullpreview.EnsureContext(ctx),
 		location:        cfg.Location,
 		image:           cfg.Image,
-		serverType:      cfg.ServerType,
 		sshUser:         cfg.SSHUsername,
 		sshKeysCacheDir: cfg.SSHKeysCacheDir,
 		logger:          logger,
@@ -420,7 +413,7 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 		return pullpreview.AccessDetails{}, err
 	}
 
-	serverType := &hcloud.ServerType{Name: p.serverType}
+	serverType := &hcloud.ServerType{Name: resolveHetznerServerType(opts.Size)}
 	image := &hcloud.Image{Name: p.image}
 	location := &hcloud.Location{Name: p.location}
 	firewalls, err := p.makeFirewall(name, opts.Ports, opts.CIDRs)

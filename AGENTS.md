@@ -68,11 +68,13 @@ Supported commands:
 
 ## Action inputs/outputs
 - Existing inputs are preserved.
-- Provider-related inputs now include only:
+- Provider-related inputs are:
   - `provider`
-- Existing additional input:
-  - `proxy_tls` (`service:port`, default empty)
-- Hetzner uses environment variables for provider config (`HCLOUD_TOKEN` / `HETZNER_API_TOKEN`, `HETZNER_LOCATION`, `HETZNER_IMAGE`, `HETZNER_SERVER_TYPE`, `HETZNER_USERNAME`) so no dedicated action inputs are required.
+  - `region`
+  - `image`
+  - `instance_type`
+  - `proxy_tls`
+- Hetzner uses shared inputs (`region`/`image` and `instance_type`) and `HCLOUD_TOKEN` credentials.
 - Outputs:
   - `url`
   - `host`
@@ -108,7 +110,7 @@ Supported commands:
 - `skills/pullpreview-demo-flow/SKILL.md`: repeatable end-to-end demo capture workflow (PR open/label/deploy/view deployment/unlabel/destroy) with strict screenshot requirements and fixed demo PR title.
 
 ## Review status (current branch)
-- Live provider validation has been run against Hetzner using `.env` with explicit `HETZNER_LOCATION=ash`, `HETZNER_SERVER_TYPE=cpx21`, `HETZNER_IMAGE=ubuntu-24.04`.
+- Live provider validation has been run against Hetzner using `.env` with `HCLOUD_TOKEN` plus CLI/action values (`--region nbg1`, `instance_type cpx21`, `--image ubuntu-24.04`).
 - `up`, `down`, and `list` flows have been exercised.
 - Follow-up cleanup items:
   - tighten `RunDown` context-name parser to avoid stripping legitimate names that resemble context suffix format

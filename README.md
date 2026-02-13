@@ -123,6 +123,8 @@ All supported `with:` inputs from `action.yml`:
 | `compose_options` | `--build` | Additional options appended to `docker compose up`. |
 | `license` | `""` | PullPreview license key. |
 | `instance_type` | `small` | Provider-specific instance size (`small` for Lightsail, `cpx21` for Hetzner). |
+| `region` | `` | Optional provider region/datacenter override (`AWS_REGION`/Hetzner location). If empty, provider defaults apply. |
+| `image` | `ubuntu-24.04` | Instance image for Hetzner (provider-specific) and ignored for AWS. |
 | `deployment_variant` | `""` | Optional short suffix to run multiple preview environments per PR (max 4 chars). |
 | `provider` | `lightsail` | Cloud provider (`lightsail`, `hetzner`). |
 | `registries` | `""` | Private registry credentials, e.g. `docker://user:password@ghcr.io`. |
@@ -135,7 +137,7 @@ Notes:
 - `proxy_tls` forces URL/output/comment links to HTTPS on port `443`, injects a Caddy proxy service, and suppresses firewall exposure for port `80`. **When using `proxy_tls`, it is strongly recommended to set `dns` to a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain) or one of the built-in `revN.click` alternatives** to avoid hitting shared Let's Encrypt rate limits on `my.preview.run`.
 - `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
 - SSH key fetches are cached between runs in the action cache.
-- For Hetzner, configure credentials and defaults via environment variables (no dedicated action inputs): `HCLOUD_TOKEN` (or `HETZNER_API_TOKEN`), optional `HETZNER_LOCATION` (default: `nbg1`), `HETZNER_IMAGE` (default: `ubuntu-24.04`), `HETZNER_SERVER_TYPE` (default: `cpx21`), and `HETZNER_USERNAME` (default: `root`).
+- For Hetzner, configure credentials and defaults via action inputs and environment: `HCLOUD_TOKEN` (required), optional `region` and `image` (`region` defaults to `nbg1`, `image` defaults to `ubuntu-24.04`). `instance_type` defaults to `cpx21` when provider is Hetzner.
 - **Let's Encrypt rate limits**: Let's Encrypt allows a maximum of [50 certificates per registered domain per week](https://letsencrypt.org/docs/rate-limits/#new-certificates-per-registered-domain). If you use `proxy_tls` and hit this limit on the default `my.preview.run` domain, switch to one of the built-in alternatives: `rev1.click`, `rev2.click`, ... `rev9.click`. Set `dns: rev1.click` in your workflow inputs. You can also use a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain).
 - For local CLI runs, set `HCLOUD_TOKEN` (for example via `.env`) when using `provider: hetzner` to avoid relying on action inputs.
 
@@ -215,7 +217,9 @@ jobs:
           app_path: ./examples/workflow-smoke
           provider: hetzner
           # optional Hetzner runtime options
-          instance_type: micro
+          instance_type: cpx21
+          image: ubuntu-24.04
+          region: nbg1
           dns: preview.chunk.io
           max_domain_length: 30
           # Open HTTPS preview URL through Caddy + Let's Encrypt.
@@ -223,10 +227,6 @@ jobs:
           ttl: 1h
         env:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
-          HETZNER_LOCATION: "nbg1"
-          HETZNER_IMAGE: "ubuntu-24.04"
-          HETZNER_SERVER_TYPE: "cpx21"
-          HETZNER_USERNAME: "root"
 
 ```
 

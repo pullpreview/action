@@ -15,11 +15,9 @@ import (
 
 func TestParseConfigFromEnv(t *testing.T) {
 	cfgRaw, err := ParseConfigFromEnv(map[string]string{
-		"HCLOUD_TOKEN":        "abc",
-		"HETZNER_LOCATION":    "fra1",
-		"HETZNER_IMAGE":       "debian-12",
-		"HETZNER_SERVER_TYPE": "cx11",
-		"HETZNER_USERNAME":    "admin",
+		"HCLOUD_TOKEN": "abc",
+		"REGION":       "fra1",
+		"IMAGE":        "debian-12",
 	})
 	if err != nil {
 		t.Fatalf("ParseConfigFromEnv() error: %v", err)
@@ -28,24 +26,21 @@ func TestParseConfigFromEnv(t *testing.T) {
 	if cfg.APIToken != "abc" {
 		t.Fatalf("token = %q, want %q", cfg.APIToken, "abc")
 	}
-	if cfg.Location != "fra1" || cfg.Image != "debian-12" || cfg.ServerType != "cx11" || cfg.SSHUsername != "admin" {
+	if cfg.Location != "fra1" || cfg.Image != "debian-12" || cfg.SSHUsername != defaultHetznerSSHUser {
 		t.Fatalf("unexpected parsed config: %#v", cfg)
 	}
 
-	cfgRaw, err = ParseConfigFromEnv(map[string]string{
-		"HETZNER_API_TOKEN": "fallback",
-	})
+	cfgRaw, err = ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback"})
 	if err != nil {
 		t.Fatalf("ParseConfigFromEnv() error: %v", err)
 	}
 	cfg = cfgRaw.(Config)
 	if cfg.APIToken != "fallback" {
-		t.Fatalf("expected fallback token")
+		t.Fatalf("unexpected token value: %q", cfg.APIToken)
 	}
-	if cfg.Location != defaultHetznerLocation || cfg.Image != defaultHetznerImage || cfg.ServerType != defaultHetznerServerType || cfg.SSHUsername != defaultHetznerSSHUser {
+	if cfg.Location != defaultHetznerLocation || cfg.Image != defaultHetznerImage || cfg.SSHUsername != defaultHetznerSSHUser {
 		t.Fatalf("expected defaults, got %#v", cfg)
 	}
-
 	if _, err := ParseConfigFromEnv(map[string]string{}); err == nil {
 		t.Fatalf("expected missing token error")
 	}
@@ -56,7 +51,6 @@ func TestBuildUserDataBranchesAndPaths(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           "ubuntu-24.04",
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     "root",
 		SSHKeysCacheDir: t.TempDir(),
 	})
@@ -109,7 +103,6 @@ func TestBuildUserDataBranchesAndPaths(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           "debian-12",
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     "root",
 		SSHKeysCacheDir: t.TempDir(),
 	})
@@ -260,7 +253,6 @@ func TestHetznerLabelSanitizationAndListMatching(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     defaultHetznerSSHUser,
 		SSHKeysCacheDir: t.TempDir(),
 	})
@@ -338,7 +330,6 @@ func TestHetznerLaunchLifecycleRecreateWhenCacheMissing(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     defaultHetznerSSHUser,
 		SSHKeysCacheDir: cacheDir,
 	})
@@ -381,7 +372,6 @@ func TestHetznerLaunchLifecycleRecreateWhenCacheInvalid(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     defaultHetznerSSHUser,
 		SSHKeysCacheDir: cacheDir,
 	})
@@ -420,7 +410,6 @@ func TestHetznerLaunchLifecycleRecreateWhenPublicIPMissing(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     defaultHetznerSSHUser,
 		SSHKeysCacheDir: cacheDir,
 	})
@@ -460,7 +449,6 @@ func TestHetznerLaunchLifecycleRecreateWhenSSHPrecheckFails(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     defaultHetznerSSHUser,
 		SSHKeysCacheDir: cacheDir,
 	})
@@ -504,7 +492,6 @@ func TestHetznerCreateFailureCleansUpServerAndKey(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     defaultHetznerSSHUser,
 		SSHKeysCacheDir: cacheDir,
 	})
@@ -538,7 +525,6 @@ func TestDestroyInstanceAndCacheSkipsCacheOnDeleteFailure(t *testing.T) {
 		APIToken:        "token",
 		Location:        defaultHetznerLocation,
 		Image:           defaultHetznerImage,
-		ServerType:      defaultHetznerServerType,
 		SSHUsername:     defaultHetznerSSHUser,
 		SSHKeysCacheDir: cacheDir,
 	})

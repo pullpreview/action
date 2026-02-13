@@ -161,13 +161,12 @@ jobs:
           always_on: master,v6
           app_path: ./examples/workflow-smoke
           provider: hetzner
+          region: nbg1
+          image: ubuntu-24.04
+          instance_type: cpx21
           dns: preview.chunk.io
           max_domain_length: 30
           proxy_tls: web:8080
           ttl: 1h
         env:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
-          HETZNER_LOCATION: "ash"
-          HETZNER_IMAGE: "ubuntu-24.04"
-          HETZNER_SERVER_TYPE: "cpx11"
-          HETZNER_USERNAME: "root"

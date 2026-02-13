@@ -66,6 +66,8 @@ type InstanceSummary struct {
 }
 
 type CommonOptions struct {
+	Region          string
+	Image           string
 	Admins          []string
 	AdminPublicKeys []string
 	Context         context.Context

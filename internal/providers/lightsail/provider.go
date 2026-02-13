@@ -3,9 +3,10 @@ package lightsail
 import (
 	"context"
 	"fmt"
+	"strings"
 
-	"github.com/pullpreview/action/internal/pullpreview"
 	"github.com/pullpreview/action/internal/providers"
+	"github.com/pullpreview/action/internal/pullpreview"
 )
 
 const (
@@ -32,7 +33,10 @@ func (c Config) Validate() error {
 }
 
 func ParseConfigFromEnv(env map[string]string) (pullpreview.ProviderConfig, error) {
-	region := env["AWS_REGION"]
+	region := strings.TrimSpace(env["REGION"])
+	if region == "" {
+		region = env["AWS_REGION"]
+	}
 	if region == "" {
 		region = DefaultRegion
 	}

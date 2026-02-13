@@ -11,9 +11,9 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/pullpreview/action/internal/providers"
 	_ "github.com/pullpreview/action/internal/providers/hetzner"
 	_ "github.com/pullpreview/action/internal/providers/lightsail"
-	"github.com/pullpreview/action/internal/providers"
 	"github.com/pullpreview/action/internal/pullpreview"
 )
 
@@ -70,8 +70,9 @@ func runUp(ctx context.Context, args []string, logger *pullpreview.Logger) {
 	if strings.TrimSpace(*name) == "" {
 		*name = defaultUpName(appPath)
 	}
-	provider := mustProvider(ctx, logger)
-	_, err := pullpreview.RunUp(pullpreview.UpOptions{AppPath: appPath, Name: *name, Common: commonFlags.ToOptions(ctx)}, provider, logger)
+	commonOptions := commonFlags.ToOptions(ctx)
+	provider := mustProvider(ctx, logger, commonOptions)
+	_, err := pullpreview.RunUp(pullpreview.UpOptions{AppPath: appPath, Name: *name, Common: commonOptions}, provider, logger)
 	if err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -102,7 +103,7 @@ func runDown(ctx context.Context, args []string, logger *pullpreview.Logger) {
 		fmt.Println("Usage: pullpreview down --name <name>")
 		os.Exit(1)
 	}
-	provider := mustProvider(ctx, logger)
+	provider := mustProvider(ctx, logger, pullpreview.CommonOptions{})
 	if err := pullpreview.RunDown(pullpreview.DownOptions{Name: *name}, provider, logger); err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -130,7 +131,8 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 		fmt.Println("Usage: pullpreview github-sync path/to/app [options]")
 		os.Exit(1)
 	}
-	provider := mustProvider(ctx, logger)
+	commonOptions := commonFlags.ToOptions(ctx)
+	provider := mustProvider(ctx, logger, commonOptions)
 	opts := pullpreview.GithubSyncOptions{
 		AppPath:           appPath,
 		Label:             *label,
@@ -138,7 +140,7 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 		DeploymentVariant: *deploymentVariant,
 		TTL:               *ttl,
 		Context:           ctx,
-		Common:            commonFlags.ToOptions(ctx),
+		Common:            commonOptions,
 	}
 	if err := pullpreview.RunGithubSync(opts, provider, logger); err != nil {
 		fmt.Println("Error:", err)
@@ -169,7 +171,7 @@ func runList(ctx context.Context, args []string, logger *pullpreview.Logger) {
 			*repo = parts[1]
 		}
 	}
-	provider := mustProvider(ctx, logger)
+	provider := mustProvider(ctx, logger, pullpreview.CommonOptions{})
 	if err := pullpreview.RunList(pullpreview.ListOptions{Org: *org, Repo: *repo}, provider, logger); err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -177,6 +179,8 @@ func runList(ctx context.Context, args []string, logger *pullpreview.Logger) {
 }
 
 type commonFlagValues struct {
+	region         string
+	image          string
 	admins         string
 	cidrs          string
 	registries     string
@@ -189,6 +193,8 @@ type commonFlagValues struct {
 
 func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 	values := &commonFlagValues{}
+	fs.StringVar(&values.region, "region", "", "Provider region to use")
+	fs.StringVar(&values.image, "image", "", "Provider image to use")
 	fs.StringVar(&values.admins, "admins", "", "Logins of GitHub users that will have their SSH key installed on the instance")
 	fs.StringVar(&values.cidrs, "cidrs", "0.0.0.0/0", "CIDRs allowed to connect to the instance")
 	fs.StringVar(&values.registries, "registries", "", "URIs of docker registries to authenticate against")
@@ -206,6 +212,8 @@ func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 
 func (c *commonFlagValues) ToOptions(ctx context.Context) pullpreview.CommonOptions {
 	opts := c.options
+	opts.Region = strings.TrimSpace(c.region)
+	opts.Image = strings.TrimSpace(c.image)
 	opts.Context = ctx
 	opts.Admins = splitCommaList(c.admins)
 	opts.CIDRs = splitCommaList(c.cidrs)
@@ -267,15 +275,26 @@ func splitLeadingPositional(args []string) (string, []string) {
 	return first, args[1:]
 }
 
-func mustProvider(ctx context.Context, logger *pullpreview.Logger) pullpreview.Provider {
+func mustProvider(ctx context.Context, logger *pullpreview.Logger, common pullpreview.CommonOptions) pullpreview.Provider {
 	providerName := strings.TrimSpace(os.Getenv("PULLPREVIEW_PROVIDER"))
-	env := environmentMap()
+	env := buildProviderEnv(common)
 	provider, _, err := providers.NewProvider(ctx, providerName, env, logger)
 	if err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
 	}
 	return provider
+}
+
+func buildProviderEnv(common pullpreview.CommonOptions) map[string]string {
+	env := environmentMap()
+	if region := strings.TrimSpace(common.Region); region != "" {
+		env["REGION"] = region
+	}
+	if image := strings.TrimSpace(common.Image); image != "" {
+		env["IMAGE"] = image
+	}
+	return env
 }
 
 func environmentMap() map[string]string {
