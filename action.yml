@@ -1,5 +1,5 @@
 name: "Preview Environments for GitHub"
-description: "Ephemeral preview deployments of your app for every pull request. Just using Docker Compose. In your AWS account."
+description: "Ephemeral preview deployments of your app for every pull request. Just using Docker Compose."
 author: "Cyril Rohr"
 branding:
   icon: anchor
@@ -61,7 +61,7 @@ inputs:
     required: false
     default: ""
   provider:
-    description: "Cloud provider to use: lightsail"
+    description: "Cloud provider to use: lightsail, hetzner"
     required: false
     default: "lightsail"
   registries:

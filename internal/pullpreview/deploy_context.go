@@ -74,10 +74,10 @@ func (i *Instance) writeRemoteEnvFile() (map[string]string, error) {
 		return nil, err
 	}
 	user := i.Username()
-	command := fmt.Sprintf(
-		"sudo mkdir -p /etc/pullpreview && sudo mv /tmp/pullpreview_env %s && sudo chown %s.%s %s && sudo chmod 0644 %s",
-		remoteEnvPath, user, user, remoteEnvPath, remoteEnvPath,
-	)
+		command := fmt.Sprintf(
+			"sudo mkdir -p /etc/pullpreview && sudo mv /tmp/pullpreview_env %s && sudo chown %s:%s %s && sudo chmod 0644 %s",
+			remoteEnvPath, user, user, remoteEnvPath, remoteEnvPath,
+		)
 	if err := i.SSH(command, nil); err != nil {
 		return nil, err
 	}
@@ -289,13 +289,13 @@ func (i *Instance) ensureRemoteBindMountTargets(syncPlan []bindMountSync) error 
 	for _, dir := range ordered {
 		quoted = append(quoted, shellQuote(dir))
 	}
-	command := fmt.Sprintf(
-		"sudo mkdir -p %s && sudo chown %s.%s %s",
-		strings.Join(quoted, " "),
-		user,
-		user,
-		strings.Join(quoted, " "),
-	)
+		command := fmt.Sprintf(
+			"sudo mkdir -p %s && sudo chown %s:%s %s",
+			strings.Join(quoted, " "),
+			user,
+			user,
+			strings.Join(quoted, " "),
+		)
 	return i.SSH(command, nil)
 }
 

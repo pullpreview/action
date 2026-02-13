@@ -144,3 +144,29 @@ jobs:
           echo "::error::Unexpected response from ${PREVIEW_URL}"
           printf '%s\n' "${response}"
           exit 1
+
+  deploy_smoke_hetzner:
+    runs-on: ubuntu-slim
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy smoke app on Hetzner
+        id: pullpreview
+        uses: "./"
+        with:
+          admins: "@collaborators/push"
+          always_on: master,v6
+          app_path: ./examples/workflow-smoke
+          provider: hetzner
+          dns: preview.chunk.io
+          max_domain_length: 30
+          proxy_tls: web:8080
+          ttl: 1h
+        env:
+          HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
+          HETZNER_LOCATION: "nbg1"
+          HETZNER_IMAGE: "ubuntu-24.04"
+          HETZNER_SERVER_TYPE: "cpx21"
+          HETZNER_USERNAME: "root"

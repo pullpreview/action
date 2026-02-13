@@ -11,7 +11,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pullpreview/action/internal/providers/lightsail"
+	_ "github.com/pullpreview/action/internal/providers/hetzner"
+	_ "github.com/pullpreview/action/internal/providers/lightsail"
+	"github.com/pullpreview/action/internal/providers"
 	"github.com/pullpreview/action/internal/pullpreview"
 )
 
@@ -267,15 +269,23 @@ func splitLeadingPositional(args []string) (string, []string) {
 
 func mustProvider(ctx context.Context, logger *pullpreview.Logger) pullpreview.Provider {
 	providerName := strings.TrimSpace(os.Getenv("PULLPREVIEW_PROVIDER"))
-	if providerName == "" || providerName == "lightsail" {
-		provider, err := lightsail.New(ctx, os.Getenv("AWS_REGION"), logger)
-		if err != nil {
-			fmt.Println("Error:", err)
-			os.Exit(1)
-		}
-		return provider
+	env := environmentMap()
+	provider, _, err := providers.NewProvider(ctx, providerName, env, logger)
+	if err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
 	}
-	fmt.Printf("Unsupported provider: %s\n", providerName)
-	os.Exit(1)
-	return nil
+	return provider
+}
+
+func environmentMap() map[string]string {
+	env := map[string]string{}
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		env[key] = value
+	}
+	return env
 }

@@ -13,11 +13,38 @@ type Provider interface {
 	Username() string
 }
 
+type ProviderMetadata interface {
+	Name() string
+	DisplayName() string
+}
+
+type SupportsSnapshots interface {
+	SupportsSnapshots() bool
+}
+
+type SupportsRestore interface {
+	SupportsRestore() bool
+}
+
+type SupportsFirewall interface {
+	SupportsFirewall() bool
+}
+
+type UserDataProvider interface {
+	BuildUserData(options UserDataOptions) (string, error)
+}
+
 type AccessDetails struct {
 	Username   string
 	IPAddress  string
 	CertKey    string
 	PrivateKey string
+}
+
+type UserDataOptions struct {
+	AppPath       string
+	SSHPublicKeys []string
+	Username      string
 }
 
 type LaunchOptions struct {
@@ -53,6 +80,19 @@ type CommonOptions struct {
 	ComposeFiles    []string
 	ComposeOptions  []string
 	PreScript       string
+	Preflight       bool
+	EnableLock      bool
+}
+
+type DownOptions struct {
+	Name string
+	Tags map[string]string
+}
+
+type ProviderConfig interface {
+	ProviderName() string
+	ProviderDisplayName() string
+	Validate() error
 }
 
 type UpOptions struct {
@@ -60,10 +100,6 @@ type UpOptions struct {
 	Name      string
 	Subdomain string
 	Common    CommonOptions
-}
-
-type DownOptions struct {
-	Name string
 }
 
 type ListOptions struct {
