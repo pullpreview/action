@@ -15,6 +15,7 @@ This repository ships a GitHub Action implemented in Go.
   - `make dist`
   - `mise exec -- go test ./...`
   - `mise exec -- go run ./cmd/pullpreview up examples/example-app`
+- Run `make test` before any push.
 - Changelog updates are maintained in GitHub Releases; `CHANGELOG.md` does not need to be amended for routine release notes.
 - Always run `make dist` before pushing source changes so the bundled CLI binary stays in sync.
 - `make dist` builds the prebuilt Linux binary under `dist/` and auto-commits only that directory via the repo’s `dist-commit` target.
