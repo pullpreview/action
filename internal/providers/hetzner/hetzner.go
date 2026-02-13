@@ -26,12 +26,13 @@ import (
 )
 
 const (
-	defaultHetznerLocation   = "nbg1"
-	defaultHetznerImage      = "ubuntu-24.04"
-	defaultHetznerServerType = "cpx21"
-	defaultHetznerSSHUser    = "root"
-	defaultHetznerSSHRetries = 10
-	hetznerSSHKeyCacheExt    = "json"
+	defaultHetznerLocation    = "nbg1"
+	defaultHetznerImage       = "ubuntu-24.04"
+	defaultHetznerServerType  = "cpx21"
+	defaultHetznerSSHUser     = "root"
+	defaultHetznerSSHRetries  = 10
+	defaultHetznerSSHInterval = 15 * time.Second
+	hetznerSSHKeyCacheExt     = "json"
 )
 
 var hetznerSSHKeyCacheFilenameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -499,7 +500,7 @@ func (p *Provider) validateSSHAccessWithRetry(server *hcloud.Server, privateKey 
 			if p.logger != nil {
 				p.logger.Warnf("SSH access validation failed for %q (attempt %d/%d): %v", strings.TrimSpace(server.Name), i+1, attempts, lastErr)
 			}
-			time.Sleep(time.Duration(1+i) * time.Second)
+			time.Sleep(defaultHetznerSSHInterval)
 		}
 	}
 	return fmt.Errorf("ssh access validation failed for %q after %d attempts: %w", strings.TrimSpace(server.Name), attempts, lastErr)
