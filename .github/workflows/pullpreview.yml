@@ -2,10 +2,6 @@ name: pullpreview
 on:
   schedule:
     - cron: "30 */4 * * *"
-  push:
-    branches:
-      - master
-      - v6
   pull_request:
     types: [labeled, unlabeled, synchronize, closed, reopened, opened]
 
@@ -18,7 +14,7 @@ permissions:
 jobs:
   deploy_smoke_1:
     runs-on: ubuntu-slim
-    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     outputs:
       live: ${{ steps.pullpreview.outputs.live }}
     timeout-minutes: 35
@@ -142,7 +138,7 @@ jobs:
 
   deploy_smoke_hetzner:
     runs-on: ubuntu-slim
-    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
