@@ -203,6 +203,82 @@ func TestFirewallRulesMatchAndSignatureNormalization(t *testing.T) {
 	}
 }
 
+func TestMakeFirewallUsesPullpreviewPrefix(t *testing.T) {
+	provider := mustNewProviderWithContext(t, Config{
+		APIToken:        "token",
+		Location:        defaultHetznerLocation,
+		Image:           defaultHetznerImage,
+		SSHUsername:     defaultHetznerSSHUser,
+		SSHKeysCacheDir: t.TempDir(),
+	})
+	client := &fakeHcloudClient{
+		firewallCreateResult: hcloud.FirewallCreateResult{
+			Firewall: &hcloud.Firewall{
+				ID:    123,
+				Name:  "ignored",
+				Rules: []hcloud.FirewallRule{},
+			},
+		},
+	}
+	provider.client = client
+
+	name := "Feature/Thing"
+	_, err := provider.makeFirewall(name, []string{"80/tcp"}, []string{"0.0.0.0/0"})
+	if err != nil {
+		t.Fatalf("makeFirewall() error: %v", err)
+	}
+	if client.firewallCreateLastOpts == nil {
+		t.Fatalf("expected firewall create opts to be captured")
+	}
+	want := fmt.Sprintf("pullpreview-%s", sanitizeNameForHetzner(name))
+	if client.firewallCreateLastOpts.Name != want {
+		t.Fatalf("unexpected firewall name: got=%q want=%q", client.firewallCreateLastOpts.Name, want)
+	}
+}
+
+func TestTerminateDeletesCanonicalFirewallWhenServerMissing(t *testing.T) {
+	cacheDir := t.TempDir()
+	provider := mustNewProviderWithContext(t, Config{
+		APIToken:        "token",
+		Location:        defaultHetznerLocation,
+		Image:           defaultHetznerImage,
+		SSHUsername:     defaultHetznerSSHUser,
+		SSHKeysCacheDir: cacheDir,
+	})
+	name := "gh-1-pr-1"
+	cachePath := provider.cachePath(name)
+	if err := provider.saveCachedSSHCredentials(name, cachedHetznerSSHCredentials{
+		InstanceName: name,
+		PrivateKey:   "private",
+	}); err != nil {
+		t.Fatalf("failed to setup cache: %v", err)
+	}
+	canonicalName := fmt.Sprintf("pullpreview-%s", sanitizeNameForHetzner(name))
+	client := &fakeHcloudClient{
+		serverListResponses: [][]*hcloud.Server{{}},
+		firewallByNameMap: map[string]*hcloud.Firewall{
+			canonicalName: {ID: 10, Name: canonicalName},
+		},
+	}
+	provider.client = client
+
+	if err := provider.Terminate(name); err != nil {
+		t.Fatalf("Terminate() error: %v", err)
+	}
+	if client.serverDeleteCalls != 0 {
+		t.Fatalf("expected no server delete when server is missing, got %d", client.serverDeleteCalls)
+	}
+	if client.firewallDeleteCalls != 1 {
+		t.Fatalf("expected one firewall delete, got %d (%v)", client.firewallDeleteCalls, client.firewallDeleteNames)
+	}
+	if len(client.firewallDeleteNames) != 1 || client.firewallDeleteNames[0] != canonicalName {
+		t.Fatalf("unexpected deleted firewalls: %v", client.firewallDeleteNames)
+	}
+	if _, statErr := os.Stat(cachePath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected cache file to be removed, stat err=%v", statErr)
+	}
+}
+
 func TestCachePathAndRoundTrip(t *testing.T) {
 	cacheDir := t.TempDir()
 	provider := &Provider{sshKeysCacheDir: cacheDir}
@@ -619,14 +695,17 @@ type fakeHcloudClient struct {
 	firewallGetByNameFn func(context.Context, string) (*hcloud.Firewall, *hcloud.Response, error)
 	firewallByNameMap   map[string]*hcloud.Firewall
 
-	firewallCreateResult hcloud.FirewallCreateResult
-	firewallCreateError  error
-	firewallCreateCalls  int
+	firewallCreateResult   hcloud.FirewallCreateResult
+	firewallCreateError    error
+	firewallCreateCalls    int
+	firewallCreateLastOpts *hcloud.FirewallCreateOpts
 
 	firewallSetRulesCalls int
 	firewallSetRulesError error
 	firewallApplyCalls    int
 	firewallApplyError    error
+	firewallDeleteCalls   int
+	firewallDeleteNames   []string
 
 	waitForCalls int
 	waitForErr   error
@@ -722,6 +801,7 @@ func (f *fakeHcloudClient) FirewallGetByName(ctx context.Context, name string) (
 
 func (f *fakeHcloudClient) FirewallCreate(ctx context.Context, opts hcloud.FirewallCreateOpts) (hcloud.FirewallCreateResult, *hcloud.Response, error) {
 	f.firewallCreateCalls++
+	f.firewallCreateLastOpts = &opts
 	if f.firewallCreateError != nil {
 		return hcloud.FirewallCreateResult{}, nil, f.firewallCreateError
 	}
@@ -745,6 +825,13 @@ func (f *fakeHcloudClient) FirewallApplyResources(ctx context.Context, firewall 
 }
 
 func (f *fakeHcloudClient) FirewallDelete(ctx context.Context, firewall *hcloud.Firewall) (*hcloud.Response, error) {
+	f.firewallDeleteCalls++
+	if firewall != nil {
+		f.firewallDeleteNames = append(f.firewallDeleteNames, firewall.Name)
+		if f.firewallByNameMap != nil {
+			delete(f.firewallByNameMap, firewall.Name)
+		}
+	}
 	return nil, nil
 }
 

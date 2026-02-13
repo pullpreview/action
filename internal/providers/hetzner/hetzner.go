@@ -512,11 +512,10 @@ func (p *Provider) Terminate(name string) error {
 	if err != nil {
 		return err
 	}
-	if server == nil {
-		return nil
-	}
-	if err := p.deleteServerAndWait(server); err != nil {
-		return err
+	if server != nil {
+		if err := p.deleteServerAndWait(server); err != nil {
+			return err
+		}
 	}
 	p.deleteFirewallForInstance(name)
 	p.removeCachedSSHKey(name)
@@ -598,7 +597,7 @@ func (p *Provider) makeFirewall(name string, ports, cidrs []string) ([]*hcloud.S
 	if len(rules) == 0 {
 		return nil, nil
 	}
-	firewallName := fmt.Sprintf("pullreview-%s", sanitizeNameForHetzner(name))
+	firewallName := fmt.Sprintf("pullpreview-%s", sanitizeNameForHetzner(name))
 	if existing, _, err := p.client.FirewallGetByName(p.ctx, firewallName); err == nil && existing != nil {
 		if !firewallRulesMatch(existing.Rules, rules) {
 			if err := p.ensureFirewallRules(existing, rules); err != nil {
