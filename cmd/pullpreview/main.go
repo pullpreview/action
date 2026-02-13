@@ -115,7 +115,6 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	label := fs.String("label", "pullpreview", "Label to use for triggering preview deployments")
 	deploymentVariant := fs.String("deployment-variant", "", "Deployment variant (4 chars max)")
-	alwaysOn := fs.String("always-on", "", "List of branches to always deploy")
 	ttl := fs.String("ttl", "infinite", "Maximum time to live for deployments (e.g. 10h, 5d, infinite)")
 	commonFlags := registerCommonFlags(fs)
 	leadingPath, parseArgs := splitLeadingPositional(args)
@@ -136,7 +135,6 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 	opts := pullpreview.GithubSyncOptions{
 		AppPath:           appPath,
 		Label:             *label,
-		AlwaysOn:          splitCommaList(*alwaysOn),
 		DeploymentVariant: *deploymentVariant,
 		TTL:               *ttl,
 		Context:           ctx,

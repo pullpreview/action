@@ -30,7 +30,6 @@ jobs:
         uses: "./"
         with:
           admins: "@collaborators/push"
-          always_on: master,v6
           app_path: ./examples/workflow-smoke
           instance_type: micro
           max_domain_length: 30
@@ -100,7 +99,6 @@ jobs:
         uses: "./"
         with:
           admins: "@collaborators/push"
-          always_on: master,v6
           app_path: ./examples/workflow-smoke
           instance_type: micro
           max_domain_length: 30
@@ -154,7 +152,6 @@ jobs:
         uses: "./"
         with:
           admins: "@collaborators/push"
-          always_on: master,v6
           app_path: ./examples/workflow-smoke
           provider: hetzner
           region: ash

@@ -9,9 +9,6 @@ inputs:
     description: "The path to your application containing a docker-compose file"
     default: "."
     required: false
-  always_on:
-    description: "List of always-on branches, irrespective of whether they correspond to an open Pull Request, comma-separated"
-    default: ""
   dns:
     description: "Which DNS suffix to use"
     default: "my.preview.run"
@@ -164,7 +161,6 @@ runs:
           --label "${{ inputs.label }}" \
           --ports "${{ inputs.ports }}" \
           --default-port "${{ inputs.default_port }}" \
-          --always-on "${{ inputs.always_on }}" \
           --instance-type "${{ inputs.instance_type }}" \
           --region "${{ inputs.region }}" \
           --image "${{ inputs.image }}" \

@@ -196,12 +196,6 @@ func clearDanglingDeployments(repo string, opts GithubSyncOptions, provider Prov
 			logger.Warnf("[clear_dangling_deployments] Unable to remove %s label for PR#%d: %v", opts.Label, number, err)
 		}
 	}
-	alwaysOn := map[string]struct{}{}
-	alwaysOnNormalized := map[string]struct{}{}
-	for _, branch := range uniqueStrings(opts.AlwaysOn) {
-		alwaysOn[branch] = struct{}{}
-		alwaysOnNormalized[NormalizeName(branch)] = struct{}{}
-	}
 	activeInstanceNames := []string{}
 	removedInstanceNames := []string{}
 	for _, inst := range instances {
@@ -223,12 +217,8 @@ func clearDanglingDeployments(repo string, opts GithubSyncOptions, provider Prov
 				detail = fmt.Sprintf("PR#%s not active/labeled", ref.PRNumber)
 			}
 		} else {
-			_, exact := alwaysOn[ref.Branch]
-			_, normalized := alwaysOnNormalized[ref.BranchNormalized]
-			if !exact && !normalized {
-				dangling = true
-				detail = fmt.Sprintf("branch %q not always_on", ref.Branch)
-			}
+			dangling = true
+			detail = fmt.Sprintf("branch %q not linked to an active PR", ref.Branch)
 		}
 		if !dangling {
 			activeInstanceNames = append(activeInstanceNames, inst.Name)
@@ -482,7 +472,7 @@ func (g *GithubSync) Sync() error {
 		}
 		_ = g.updateGitHubStatus(statusDestroyed, "")
 		g.writeStepSummary(statusDestroyed, action, "", nil)
-	case actionPRUp, actionPRPush, actionBranchPush:
+	case actionPRUp, actionPRPush:
 		_ = g.updateGitHubStatus(statusDeploying, "")
 		instance := g.buildInstance()
 		var upInstance *Instance
@@ -511,7 +501,6 @@ const (
 	actionBranchDown actionType = "branch_down"
 	actionPRUp       actionType = "pr_up"
 	actionPRPush     actionType = "pr_push"
-	actionBranchPush actionType = "branch_push"
 )
 
 type deploymentStatus string
@@ -526,10 +515,6 @@ const (
 
 func (g *GithubSync) guessAction() actionType {
 	if g.prNumber() == 0 {
-		branch := strings.TrimPrefix(g.ref(), "refs/heads/")
-		if containsString(g.opts.AlwaysOn, branch) {
-			return actionBranchPush
-		}
 		return actionBranchDown
 	}
 
@@ -1150,13 +1135,4 @@ func instanceToCommon(inst *Instance) CommonOptions {
 		ComposeOptions:  inst.ComposeOptions,
 		PreScript:       inst.PreScript,
 	}
-}
-
-func containsString(list []string, value string) bool {
-	for _, v := range list {
-		if v == value {
-			return true
-		}
-	}
-	return false
 }

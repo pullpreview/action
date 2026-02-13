@@ -200,12 +200,12 @@ func TestGuessActionFromPushFixtureWithPR(t *testing.T) {
 	}
 }
 
-func TestGuessActionFromSoloPushAlwaysOn(t *testing.T) {
+func TestGuessActionFromSoloPush(t *testing.T) {
 	event := loadFixtureEvent(t, "github_event_push_solo_organization.json")
 	client := &fakeGitHub{latestSHA: event.HeadCommit.ID}
-	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", AlwaysOn: []string{"dev"}, Common: CommonOptions{}}, client, fakeProvider{running: true})
-	if got := sync.guessAction(); got != actionBranchPush {
-		t.Fatalf("guessAction()=%s, want %s", got, actionBranchPush)
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, client, fakeProvider{running: true})
+	if got := sync.guessAction(); got != actionBranchDown {
+		t.Fatalf("guessAction()=%s, want %s", got, actionBranchDown)
 	}
 }
 
@@ -503,7 +503,7 @@ func TestRenderStepSummaryForDeployedState(t *testing.T) {
 	}
 }
 
-func TestRunGithubSyncFromEnvironmentRunsDownForBranchPushWithoutAlwaysOn(t *testing.T) {
+func TestRunGithubSyncFromEnvironmentRunsDownForBranchPush(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	event := loadFixtureEvent(t, "github_event_push_solo_organization.json")
 	path := writeFixtureToTempEventFile(t, event)
@@ -541,7 +541,7 @@ func TestRunGithubSyncFromEnvironmentRunsDownForBranchPushWithoutAlwaysOn(t *tes
 	}
 }
 
-func TestClearDanglingDeploymentsDestroysInstancesNotLinkedToActivePROrAlwaysOnBranch(t *testing.T) {
+func TestClearDanglingDeploymentsDestroysInstancesNotLinkedToActivePR(t *testing.T) {
 	client := &fakeGitHub{
 		issues: []*gh.Issue{
 			{
@@ -576,15 +576,14 @@ func TestClearDanglingDeploymentsDestroysInstancesNotLinkedToActivePROrAlwaysOnB
 	logger.base = log.New(&logs, "", 0)
 
 	err := clearDanglingDeployments("org/repo", GithubSyncOptions{
-		Label:    "pullpreview-custom",
-		AlwaysOn: []string{"main"},
+		Label: "pullpreview-custom",
 	}, provider, client, logger)
 	if err != nil {
 		t.Fatalf("clearDanglingDeployments() error: %v", err)
 	}
 
 	sort.Strings(destroyed)
-	wantDestroyed := []string{"gh-1-branch-feature-x", "gh-1-pr-11"}
+	wantDestroyed := []string{"gh-1-branch-feature-x", "gh-1-branch-main", "gh-1-pr-11"}
 	if strings.Join(destroyed, ",") != strings.Join(wantDestroyed, ",") {
 		t.Fatalf("unexpected destroyed instances: got=%v want=%v", destroyed, wantDestroyed)
 	}
@@ -598,10 +597,10 @@ func TestClearDanglingDeploymentsDestroysInstancesNotLinkedToActivePROrAlwaysOnB
 		t.Fatalf("expected closed PR label cleanup for PR#11, got %v", client.removedLabelPRs)
 	}
 	logOutput := logs.String()
-	if !strings.Contains(logOutput, "Active instances: gh-1-branch-main, gh-1-pr-10") {
+	if !strings.Contains(logOutput, "Active instances: gh-1-pr-10") {
 		t.Fatalf("missing active instances report in logs: %s", logOutput)
 	}
-	if !strings.Contains(logOutput, "Dangling removed: gh-1-branch-feature-x, gh-1-pr-11") {
+	if !strings.Contains(logOutput, "Dangling removed: gh-1-branch-feature-x, gh-1-branch-main, gh-1-pr-11") {
 		t.Fatalf("missing dangling removed report in logs: %s", logOutput)
 	}
 }
