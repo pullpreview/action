@@ -379,7 +379,7 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 			}
 			continue
 		}
-		if err := p.validateSSHAccess(existing, strings.TrimSpace(cached.PrivateKey)); err != nil {
+		if err := p.validateSSHAccessWithRetry(existing, strings.TrimSpace(cached.PrivateKey), 3); err != nil {
 			if p.logger != nil {
 				p.logger.Warnf("Existing Hetzner instance %q SSH check failed; recreating instance (%v)", name, err)
 			}
@@ -461,6 +461,9 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 	if publicIP == "" {
 		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, fmt.Errorf("created server missing public IP"))
 	}
+	if err := p.validateSSHAccessWithRetry(server, privateKey, 3); err != nil {
+		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, err)
+	}
 	if err := p.saveCachedSSHCredentials(name, cachedHetznerSSHCredentials{
 		InstanceName: name,
 		PrivateKey:   privateKey,
@@ -478,6 +481,27 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 		IPAddress:  publicIP,
 		PrivateKey: privateKey,
 	}, nil
+}
+
+func (p *Provider) validateSSHAccessWithRetry(server *hcloud.Server, privateKey string, attempts int) error {
+	if attempts <= 0 {
+		attempts = 1
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if err := p.validateSSHAccess(server, privateKey); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if i < attempts-1 {
+			if p.logger != nil {
+				p.logger.Warnf("SSH access validation failed for %q (attempt %d/%d): %v", strings.TrimSpace(server.Name), i+1, attempts, lastErr)
+			}
+			time.Sleep(time.Duration(1+i) * time.Second)
+		}
+	}
+	return fmt.Errorf("ssh access validation failed for %q after %d attempts: %w", strings.TrimSpace(server.Name), attempts, lastErr)
 }
 
 func (p *Provider) Terminate(name string) error {

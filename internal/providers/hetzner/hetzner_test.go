@@ -486,6 +486,45 @@ func TestHetznerLaunchLifecycleRecreateWhenSSHPrecheckFails(t *testing.T) {
 	}
 }
 
+func TestHetznerCreateLifecycleRecreateWhenSSHPrecheckFails(t *testing.T) {
+	cacheDir := t.TempDir()
+	provider := mustNewProviderWithContext(t, Config{
+		APIToken:        "token",
+		Location:        defaultHetznerLocation,
+		Image:           defaultHetznerImage,
+		SSHUsername:     defaultHetznerSSHUser,
+		SSHKeysCacheDir: cacheDir,
+	})
+	instance := "gh-1-pr-1"
+	created := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
+	client := &fakeHcloudClient{
+		serverListResponses: [][]*hcloud.Server{{nil}},
+		serverCreateResult:  hcloud.ServerCreateResult{Server: created},
+		sshKeyCreateResult:  mustTestSSHKey(12),
+	}
+	provider.client = client
+
+	originalRunSSHCommand := runSSHCommand
+	defer func() { runSSHCommand = originalRunSSHCommand }()
+	runSSHCommand = func(context.Context, string, string, string) ([]byte, error) {
+		return nil, fmt.Errorf("ssh unavailable")
+	}
+
+	_, err := provider.Launch(instance, pullpreview.LaunchOptions{})
+	if err == nil {
+		t.Fatalf("expected Launch() error")
+	}
+	if !strings.Contains(err.Error(), "ssh unavailable") {
+		t.Fatalf("expected ssh validation failure, got %v", err)
+	}
+	if client.serverDeleteCalls != 1 {
+		t.Fatalf("expected one delete call on create SSH precheck failure, got %d", client.serverDeleteCalls)
+	}
+	if client.sshKeyDeleteCalls != 1 {
+		t.Fatalf("expected one ssh key delete call on create SSH precheck failure, got %d", client.sshKeyDeleteCalls)
+	}
+}
+
 func TestHetznerCreateFailureCleansUpServerAndKey(t *testing.T) {
 	cacheDir := t.TempDir()
 	provider := mustNewProviderWithContext(t, Config{
