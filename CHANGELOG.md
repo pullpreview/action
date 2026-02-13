@@ -141,6 +141,10 @@
 
 - Support for specifying instance type
 
+## v3 - 20200428
+
+- Support for always on branches
+
 ## v3 - 20200421
 
 - Support for GitHub deployments API
