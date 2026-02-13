@@ -281,11 +281,21 @@ func (p *Provider) BuildUserData(options pullpreview.UserDataOptions) (string, e
 		"#!/usr/bin/env bash",
 		"set -xe ; set -o pipefail",
 	}
+	homeDir := pullpreview.HomeDirForUser(options.Username)
+	lines = append(lines, fmt.Sprintf("mkdir -p %s/.ssh", homeDir))
+	if options.Username != "root" {
+		lines = append(lines, "if [ -f /root/.ssh/authorized_keys ]; then")
+		lines = append(lines, fmt.Sprintf("  cp /root/.ssh/authorized_keys %s/.ssh/authorized_keys", homeDir))
+		lines = append(lines, "fi")
+	}
 	if len(options.SSHPublicKeys) > 0 {
-		homeDir := pullpreview.HomeDirForUser(options.Username)
-		lines = append(lines, fmt.Sprintf("echo '%s' > %s/.ssh/authorized_keys", strings.Join(options.SSHPublicKeys, "\n"), homeDir))
-		lines = append(lines, fmt.Sprintf("chown -R %s:%s %s/.ssh", options.Username, options.Username, homeDir))
-		lines = append(lines, fmt.Sprintf("chmod 0700 %s/.ssh && chmod 0600 %s/.ssh/authorized_keys", homeDir, homeDir))
+		lines = append(lines, fmt.Sprintf("echo '%s' >> %s/.ssh/authorized_keys", strings.Join(options.SSHPublicKeys, "\n"), homeDir))
+	}
+	if options.Username != "root" || len(options.SSHPublicKeys) > 0 {
+		lines = append(lines,
+			fmt.Sprintf("chown -R %s:%s %s/.ssh", options.Username, options.Username, homeDir),
+			fmt.Sprintf("chmod 0700 %s/.ssh && chmod 0600 %s/.ssh/authorized_keys", homeDir, homeDir),
+		)
 	}
 	lines = append(lines,
 		fmt.Sprintf("mkdir -p %s && chown -R %s:%s %s", options.AppPath, options.Username, options.Username, options.AppPath),

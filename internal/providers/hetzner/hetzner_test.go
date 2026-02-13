@@ -78,13 +78,19 @@ func TestBuildUserDataBranchesAndPaths(t *testing.T) {
 	if !strings.Contains(script, "DISTRO=ubuntu") {
 		t.Fatalf("missing ubuntu distro branch: %s", script)
 	}
+	if !strings.Contains(script, "mkdir -p /home/ec2-user/.ssh") {
+		t.Fatalf("missing SSH key directory setup: %s", script)
+	}
+	if !strings.Contains(script, "cp /root/.ssh/authorized_keys /home/ec2-user/.ssh/authorized_keys") {
+		t.Fatalf("missing authorized key propagation from root: %s", script)
+	}
 	if !strings.Contains(script, "chown -R ec2-user:ec2-user /home/ec2-user/.ssh") {
 		t.Fatalf("missing user path + chown: %s", script)
 	}
 	if !strings.Contains(script, "chmod 0700 /home/ec2-user/.ssh && chmod 0600 /home/ec2-user/.ssh/authorized_keys") {
 		t.Fatalf("missing ssh key file protection setup: %s", script)
 	}
-	if !strings.Contains(script, "echo 'ssh-ed25519 AAA\nssh-rsa BBB' > /home/ec2-user/.ssh/authorized_keys") {
+	if !strings.Contains(script, "echo 'ssh-ed25519 AAA\nssh-rsa BBB' >> /home/ec2-user/.ssh/authorized_keys") {
 		t.Fatalf("missing authorized_keys injection: %s", script)
 	}
 
@@ -95,8 +101,8 @@ func TestBuildUserDataBranchesAndPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildUserData() error: %v", err)
 	}
-	if strings.Contains(noKeyScript, "authorized_keys") {
-		t.Fatalf("did not expect authorized key setup: %s", noKeyScript)
+	if !strings.Contains(noKeyScript, "cp /root/.ssh/authorized_keys /home/ec2-user/.ssh/authorized_keys") {
+		t.Fatalf("expected root authorized_keys propagation for non-root users: %s", noKeyScript)
 	}
 
 	debian := mustNewProviderWithContext(t, Config{

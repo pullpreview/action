@@ -170,4 +170,4 @@ jobs:
           HETZNER_LOCATION: "ash"
           HETZNER_IMAGE: "ubuntu-24.04"
           HETZNER_SERVER_TYPE: "cpx11"
-          HETZNER_USERNAME: "ubuntu"
+          HETZNER_USERNAME: "root"
