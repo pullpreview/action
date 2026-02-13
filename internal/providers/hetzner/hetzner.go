@@ -30,6 +30,7 @@ const (
 	defaultHetznerImage      = "ubuntu-24.04"
 	defaultHetznerServerType = "cpx21"
 	defaultHetznerSSHUser    = "root"
+	defaultHetznerSSHRetries = 10
 	hetznerSSHKeyCacheExt    = "json"
 )
 
@@ -379,7 +380,7 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 			}
 			continue
 		}
-		if err := p.validateSSHAccessWithRetry(existing, strings.TrimSpace(cached.PrivateKey), 3); err != nil {
+		if err := p.validateSSHAccessWithRetry(existing, strings.TrimSpace(cached.PrivateKey), defaultHetznerSSHRetries); err != nil {
 			if p.logger != nil {
 				p.logger.Warnf("Existing Hetzner instance %q SSH check failed; recreating instance (%v)", name, err)
 			}
@@ -461,7 +462,7 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 	if publicIP == "" {
 		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, fmt.Errorf("created server missing public IP"))
 	}
-	if err := p.validateSSHAccessWithRetry(server, privateKey, 3); err != nil {
+	if err := p.validateSSHAccessWithRetry(server, privateKey, defaultHetznerSSHRetries); err != nil {
 		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, err)
 	}
 	if err := p.saveCachedSSHCredentials(name, cachedHetznerSSHCredentials{
