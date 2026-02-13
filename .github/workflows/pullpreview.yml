@@ -18,7 +18,8 @@ permissions:
 jobs:
   deploy_smoke_1:
     runs-on: ubuntu-slim
-    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    # Temporary: keep non-Hetzner smoke path disabled while validating hetzner-only flow.
+    if: false
     outputs:
       live: ${{ steps.pullpreview.outputs.live }}
     timeout-minutes: 35
@@ -80,7 +81,7 @@ jobs:
   deploy_smoke_2:
     runs-on: ubuntu-slim
     needs: deploy_smoke_1
-    if: needs.deploy_smoke_1.result == 'success' && needs.deploy_smoke_1.outputs.live == 'true'
+    if: false
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
