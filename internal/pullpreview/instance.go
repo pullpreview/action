@@ -299,7 +299,7 @@ func (i *Instance) SetupSSHAccess() error {
 	}
 	content := strings.Join(keys, "\n") + "\n"
 	homeDir := HomeDirForUser(i.Username())
-	return i.SCP(bytes.NewBufferString(content), fmt.Sprintf("%s/.ssh/authorized_keys", homeDir), "0600")
+	return i.appendRemoteFile(bytes.NewBufferString(content), fmt.Sprintf("%s/.ssh/authorized_keys", homeDir), "0600")
 }
 
 func (i *Instance) SetupPreScript() error {
@@ -309,6 +309,11 @@ func (i *Instance) SetupPreScript() error {
 
 func (i *Instance) SCP(input io.Reader, target, mode string) error {
 	command := fmt.Sprintf("cat - > %s && chmod %s %s", target, mode, target)
+	return i.SSH(command, input)
+}
+
+func (i *Instance) appendRemoteFile(input io.Reader, target, mode string) error {
+	command := fmt.Sprintf("cat - >> %s && chmod %s %s", target, mode, target)
 	return i.SSH(command, input)
 }
 
