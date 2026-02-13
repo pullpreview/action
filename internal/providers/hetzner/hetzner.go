@@ -204,7 +204,7 @@ func ParseConfigFromEnv(env map[string]string) (pullpreview.ProviderConfig, erro
 		SSHUsername:     sshUser,
 		SSHKeysCacheDir: sshKeysCacheDir,
 	}
-	if _, _, err := parseHetznerCAKey(caKey); err != nil {
+	if _, _, _, _, err := parseHetznerCAKey(caKey); err != nil {
 		return cfg, err
 	}
 	return cfg, cfg.Validate()
@@ -247,9 +247,12 @@ func newProviderWithContext(ctx context.Context, cfg Config, logger *pullpreview
 	if client == nil {
 		return nil, fmt.Errorf("client cannot be nil")
 	}
-	caSigner, caPublicKey, err := parseHetznerCAKey(cfg.CAKey)
+	caSigner, caPublicKey, caSource, _, err := parseHetznerCAKey(cfg.CAKey)
 	if err != nil {
 		return nil, err
+	}
+	if logger != nil {
+		logger.Infof("Hetzner SSH CA pre-check passed (%s)", caSource)
 	}
 	return &Provider{
 		client:          client,
@@ -845,29 +848,45 @@ func generateUserCertificate(caSigner ssh.Signer, userSigner ssh.Signer, princip
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(cert))), nil
 }
 
-func parseHetznerCAKey(raw string) (ssh.Signer, string, error) {
+func parseHetznerCAKey(raw string) (ssh.Signer, string, string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, "", fmt.Errorf("HETZNER_CA_KEY is required")
+		return nil, "", "", false, fmt.Errorf("HETZNER_CA_KEY is required")
 	}
 
+	caSource := "inline HETZNER_CA_KEY"
+	caSourceFromFile := false
 	data := []byte(raw)
-	if info, err := os.Stat(raw); err == nil && !info.IsDir() {
+
+	if info, err := os.Stat(raw); err == nil {
+		if info.IsDir() {
+			return nil, "", "", false, fmt.Errorf("HETZNER_CA_KEY %q refers to a directory", raw)
+		}
+		caSource = raw
+		caSourceFromFile = true
 		data, err = os.ReadFile(raw)
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to read HETZNER_CA_KEY from %q: %w", raw, err)
+			return nil, "", "", false, fmt.Errorf("failed to read HETZNER_CA_KEY from %q: %w", raw, err)
 		}
 	}
 
 	signer, err := ssh.ParsePrivateKey(data)
 	if err != nil {
-		return nil, "", fmt.Errorf("invalid HETZNER_CA_KEY: %w", err)
+		prefix := "inline HETZNER_CA_KEY"
+		if caSourceFromFile {
+			prefix = fmt.Sprintf("HETZNER_CA_KEY file %q", caSource)
+		}
+		return nil, "", caSource, caSourceFromFile, fmt.Errorf("invalid %s: %w", prefix, err)
 	}
 	publicKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
 	if publicKey == "" {
-		return nil, "", fmt.Errorf("invalid HETZNER_CA_KEY: unable to derive public key")
+		errPrefix := "inline HETZNER_CA_KEY"
+		if caSourceFromFile {
+			errPrefix = fmt.Sprintf("HETZNER_CA_KEY file %q", caSource)
+		}
+		return nil, "", caSource, caSourceFromFile, fmt.Errorf("invalid %s: unable to derive public key", errPrefix)
 	}
-	return signer, publicKey, nil
+	return signer, publicKey, caSource, caSourceFromFile, nil
 }
 
 func (p *Provider) cachePath(name string) string {
