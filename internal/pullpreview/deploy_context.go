@@ -494,7 +494,7 @@ func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 	}()
 
 	credentials := ParseRegistryCredentials(i.Registries, i.Logger)
-	if err := loginRegistriesOnRunner(i.Context, credentials, env); err != nil {
+	if err := loginRegistriesOnRunner(i.Context, contextName, credentials, env); err != nil {
 		return err
 	}
 
@@ -518,10 +518,14 @@ func (i *Instance) runComposeOnRemoteContext(composeConfig []byte) error {
 	return nil
 }
 
-func loginRegistriesOnRunner(ctx context.Context, credentials []RegistryCredential, env []string) error {
+func loginRegistriesOnRunner(ctx context.Context, contextName string, credentials []RegistryCredential, env []string) error {
 	ctx = ensureContext(ctx)
 	for _, cred := range credentials {
-		cmd := exec.CommandContext(ctx, "docker", "login", cred.Host, "-u", cred.Username, "--password-stdin")
+		cmdArgs := []string{"login", cred.Host, "-u", cred.Username, "--password-stdin"}
+		if strings.TrimSpace(contextName) != "" {
+			cmdArgs = append([]string{"--context", contextName}, cmdArgs...)
+		}
+		cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
 		cmd.Env = env
 		cmd.Stdin = strings.NewReader(cred.Password + "\n")
 		cmd.Stdout = os.Stdout

@@ -166,6 +166,8 @@ jobs:
           instance_type: cpx21
           dns: preview.chunk.io
           max_domain_length: 30
+          # required here because the mysql image is private in GHCR
+          registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
           proxy_tls: web:8080
           ttl: 1h
         env:

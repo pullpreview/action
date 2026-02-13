@@ -98,7 +98,7 @@ func TestRemoteBindSourceRootPath(t *testing.T) {
 }
 
 func TestLoginRegistriesOnRunnerNoop(t *testing.T) {
-	if err := loginRegistriesOnRunner(nil, nil, nil); err != nil {
+	if err := loginRegistriesOnRunner(nil, "", nil, nil); err != nil {
 		t.Fatalf("expected empty registry list to be a no-op: %v", err)
 	}
 }
