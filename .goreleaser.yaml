@@ -1,0 +1,38 @@
+version: 2
+
+project_name: pullpreview
+
+builds:
+  - id: pullpreview
+    main: ./cmd/pullpreview
+    binary: pullpreview
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s
+      - -w
+
+archives:
+  - id: pullpreview
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+release:
+  draft: false
+  prerelease: auto
+  mode: replace

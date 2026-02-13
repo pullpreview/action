@@ -166,3 +166,22 @@ func TestSSHBuildsCommandWithExpectedArguments(t *testing.T) {
 		t.Fatalf("unexpected ssh command args: %s", args)
 	}
 }
+
+func TestSetupSSHAccessAppendsAuthorizedKeys(t *testing.T) {
+	inst := NewInstance("my-app", CommonOptions{
+		AdminPublicKeys: []string{"ssh-rsa AAA", "ssh-ed25519 BBB"},
+	}, fakeProvider{}, nil)
+	runner := &captureRunner{}
+	inst.Runner = runner
+
+	if err := inst.SetupSSHAccess(); err != nil {
+		t.Fatalf("SetupSSHAccess() error: %v", err)
+	}
+	if len(runner.args) != 1 {
+		t.Fatalf("expected one ssh command, got %d", len(runner.args))
+	}
+	command := strings.Join(runner.args[0], " ")
+	if !strings.Contains(command, "cat - >>") {
+		t.Fatalf("expected SetupSSHAccess to append authorized_keys, command: %s", command)
+	}
+}

@@ -117,10 +117,25 @@ func (i *Instance) LaunchAndWait() error {
 		i.Logger.Infof("Creating or restoring instance name=%s size=%s", i.Name, i.Size)
 	}
 
-	userData := UserData{AppPath: remoteAppPath, SSHPublicKeys: i.SSHPublicKeys(), Username: i.Username()}
+	userData := UserData{
+		AppPath:       remoteAppPath,
+		SSHPublicKeys: i.SSHPublicKeys(),
+		Username:      i.Username(),
+	}.Script()
+	if provider, ok := i.Provider.(UserDataProvider); ok {
+		generatedUserData, err := provider.BuildUserData(UserDataOptions{
+			AppPath:       remoteAppPath,
+			SSHPublicKeys: i.SSHPublicKeys(),
+			Username:      i.Username(),
+		})
+		if err != nil {
+			return err
+		}
+		userData = generatedUserData
+	}
 	access, err := i.Provider.Launch(i.Name, LaunchOptions{
 		Size:     i.Size,
-		UserData: userData.Script(),
+		UserData: userData,
 		Ports:    i.PortsWithDefaults(),
 		CIDRs:    i.CIDRs,
 		Tags:     i.Tags,
@@ -279,8 +294,12 @@ func (i *Instance) SSHPublicKeys() []string {
 
 func (i *Instance) SetupSSHAccess() error {
 	keys := i.SSHPublicKeys()
+	if len(keys) == 0 {
+		return nil
+	}
 	content := strings.Join(keys, "\n") + "\n"
-	return i.SCP(bytes.NewBufferString(content), fmt.Sprintf("/home/%s/.ssh/authorized_keys", i.Username()), "0600")
+	homeDir := HomeDirForUser(i.Username())
+	return i.appendRemoteFile(bytes.NewBufferString(content), fmt.Sprintf("%s/.ssh/authorized_keys", homeDir), "0600")
 }
 
 func (i *Instance) SetupPreScript() error {
@@ -290,6 +309,11 @@ func (i *Instance) SetupPreScript() error {
 
 func (i *Instance) SCP(input io.Reader, target, mode string) error {
 	command := fmt.Sprintf("cat - > %s && chmod %s %s", target, mode, target)
+	return i.SSH(command, input)
+}
+
+func (i *Instance) appendRemoteFile(input io.Reader, target, mode string) error {
+	command := fmt.Sprintf("cat - >> %s && chmod %s %s", target, mode, target)
 	return i.SSH(command, input)
 }
 
@@ -371,7 +395,8 @@ func (i *Instance) writeTempKeys() (string, string, error) {
 }
 
 func (i *Instance) EnsureRemoteAuthorizedKeysOwner() error {
-	command := fmt.Sprintf("chown %s.%s /home/%s/.ssh/authorized_keys && chmod 0600 /home/%s/.ssh/authorized_keys", i.Username(), i.Username(), i.Username(), i.Username())
+	homeDir := HomeDirForUser(i.Username())
+	command := fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys && chmod 0600 %s/.ssh/authorized_keys", i.Username(), i.Username(), homeDir, homeDir)
 	return i.SSH(command, nil)
 }
 
@@ -383,8 +408,10 @@ func (i *Instance) SetupScripts() error {
 	if err := i.SetupSSHAccess(); err != nil {
 		return err
 	}
-	if err := i.EnsureRemoteAuthorizedKeysOwner(); err != nil {
-		return err
+	if len(i.SSHPublicKeys()) > 0 {
+		if err := i.EnsureRemoteAuthorizedKeysOwner(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

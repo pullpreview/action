@@ -11,15 +11,16 @@ type UserData struct {
 }
 
 func (u UserData) Script() string {
+	homeDir := HomeDirForUser(u.Username)
 	lines := []string{
 		"#!/bin/bash",
 		"set -xe ; set -o pipefail",
 	}
 	if len(u.SSHPublicKeys) > 0 {
-		lines = append(lines, "echo '"+strings.Join(u.SSHPublicKeys, "\n")+"' > /home/"+u.Username+"/.ssh/authorized_keys")
+		lines = append(lines, "echo '"+strings.Join(u.SSHPublicKeys, "\n")+"' > "+homeDir+"/.ssh/authorized_keys")
 	}
 	lines = append(lines,
-		"mkdir -p "+u.AppPath+" && chown -R "+u.Username+"."+u.Username+" "+u.AppPath,
+		"mkdir -p "+u.AppPath+" && chown -R "+u.Username+":"+u.Username+" "+u.AppPath,
 		"echo 'cd "+u.AppPath+"' > /etc/profile.d/pullpreview.sh",
 		"test -s /swapfile || ( fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab )",
 		"systemctl disable --now tmp.mount",
@@ -33,7 +34,7 @@ func (u UserData) Script() string {
 		"usermod -aG docker "+u.Username,
 		"systemctl restart docker",
 		"echo 'docker system prune -f && docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune",
-		"mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R "+u.Username+"."+u.Username+" /etc/pullpreview",
+		"mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready && chown -R "+u.Username+":"+u.Username+" /etc/pullpreview",
 	)
 	return strings.Join(lines, "\n")
 }

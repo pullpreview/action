@@ -14,7 +14,7 @@ _always-on_ branches.
 When triggered, it will:
 
 1. Check out the repository code
-2. Provision a cheap AWS Lightsail instance, with docker and docker-compose set up
+2. Provision a preview instance (Lightsail by default, or Hetzner with `provider: hetzner`), with docker and docker-compose set up
 3. Continuously deploy the specified pull requests and branches, using your docker-compose file(s)
 4. Report the preview instance URL in the GitHub UI
 
@@ -30,7 +30,7 @@ Adding the label triggers the deployment. A PR comment appears immediately with 
 
 ### Step 2 — Instance is provisioned
 
-PullPreview creates (or restores) a Lightsail instance and waits for SSH access.
+PullPreview creates (or restores) a preview instance and waits for SSH access.
 
 <img src="img/02-deploying.png">
 
@@ -122,9 +122,11 @@ All supported `with:` inputs from `action.yml`:
 | `compose_files` | `docker-compose.yml` | Comma-separated Compose files passed to deploy. |
 | `compose_options` | `--build` | Additional options appended to `docker compose up`. |
 | `license` | `""` | PullPreview license key. |
-| `instance_type` | `small` | Lightsail instance bundle (`nano`, `micro`, `small`, etc.). |
+| `instance_type` | `small` | Provider-specific instance size (`small` for Lightsail, `cpx21` for Hetzner). |
+| `region` | `` | Optional provider region/datacenter override (`AWS_REGION`/Hetzner location). If empty, provider defaults apply. |
+| `image` | `ubuntu-24.04` | Instance image for Hetzner (provider-specific) and ignored for AWS. |
 | `deployment_variant` | `""` | Optional short suffix to run multiple preview environments per PR (max 4 chars). |
-| `provider` | `lightsail` | Cloud provider (currently Lightsail). |
+| `provider` | `lightsail` | Cloud provider (`lightsail`, `hetzner`). |
 | `registries` | `""` | Private registry credentials, e.g. `docker://user:password@ghcr.io`. |
 | `proxy_tls` | `""` | Automatic HTTPS forwarding with Caddy + Let's Encrypt (`service:port`, e.g. `web:80`). |
 | `pre_script` | `""` | Path to a local shell script (relative to `app_path`) executed inline over SSH before compose deploy (should be self-contained). |
@@ -135,7 +137,16 @@ Notes:
 - `proxy_tls` forces URL/output/comment links to HTTPS on port `443`, injects a Caddy proxy service, and suppresses firewall exposure for port `80`. **When using `proxy_tls`, it is strongly recommended to set `dns` to a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain) or one of the built-in `revN.click` alternatives** to avoid hitting shared Let's Encrypt rate limits on `my.preview.run`.
 - `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
 - SSH key fetches are cached between runs in the action cache.
+- For Hetzner, configure credentials and defaults via action inputs and environment: `HCLOUD_TOKEN` (required), `HETZNER_CA_KEY` (required), optional `region` and `image` (`region` defaults to `nbg1`, `image` defaults to `ubuntu-24.04`). `instance_type` defaults to `cpx21` when provider is Hetzner.
+- `HETZNER_CA_KEY` must be an SSH private key (RSA or Ed25519) for the instance-access CA. PullPreview signs a per-run ephemeral login key with this CA key and uses SSH certificates (`...-cert.pub`) instead of reusing a persistent private key across runs.
+- Generate a CA key once for your repository secret:
+
+```bash
+ssh-keygen -t rsa -b 3072 -m PEM -N "" -f hetzner_ca_key
+```
+
 - **Let's Encrypt rate limits**: Let's Encrypt allows a maximum of [50 certificates per registered domain per week](https://letsencrypt.org/docs/rate-limits/#new-certificates-per-registered-domain). If you use `proxy_tls` and hit this limit on the default `my.preview.run` domain, switch to one of the built-in alternatives: `rev1.click`, `rev2.click`, ... `rev9.click`. Set `dns: rev1.click` in your workflow inputs. You can also use a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain).
+- For local CLI runs, set `HCLOUD_TOKEN` and `HETZNER_CA_KEY` (for example via `.env`) when using `provider: hetzner` to avoid relying on action inputs.
 
 ## Example
 
@@ -184,6 +195,61 @@ jobs:
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
           AWS_REGION: "us-east-1"
 ```
+
+## Hetzner example
+
+```yaml
+# .github/workflows/pullpreview-hetzner.yml
+name: PullPreview
+on:
+  schedule:
+    - cron: "30 */4 * * *"
+  push:
+    branches:
+      - master
+  pull_request:
+    types: [labeled, unlabeled, synchronize, closed, reopened, opened]
+
+jobs:
+  deploy_hetzner:
+    runs-on: ubuntu-slim
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pullpreview/action@v6
+        with:
+          admins: "@collaborators/push"
+          always_on: master
+          app_path: ./examples/workflow-smoke
+          provider: hetzner
+          # optional Hetzner runtime options
+          instance_type: cpx21
+          image: ubuntu-24.04
+          region: nbg1
+          dns: preview.chunk.io
+          max_domain_length: 30
+          # Open HTTPS preview URL through Caddy + Let's Encrypt.
+          proxy_tls: web:8080
+          ttl: 1h
+        env:
+          HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
+          HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"
+
+```
+
+## CLI usage (installed binary)
+
+Pull the released CLI binary from GitHub Releases, install it in your PATH, then use:
+
+```bash
+pullpreview up examples/workflow-smoke --name pullpreview-local-smoke
+pullpreview list
+pullpreview list my-org/my-repo
+pullpreview down --name pullpreview-local-smoke
+```
+
+For installation details and local validation instructions (including Hetzner env setup), see [wiki/CLI.md](wiki/CLI.md).
 
 ## Is this free?
 

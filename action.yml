@@ -1,5 +1,5 @@
 name: "Preview Environments for GitHub"
-description: "Ephemeral preview deployments of your app for every pull request. Just using Docker Compose. In your AWS account."
+description: "Ephemeral preview deployments of your app for every pull request. Just using Docker Compose."
 author: "Cyril Rohr"
 branding:
   icon: anchor
@@ -56,12 +56,20 @@ inputs:
     description: "Instance type to use"
     required: false
     default: "small"
+  region:
+    description: "Provider region (AWS region or Hetzner location), overrides provider defaults"
+    required: false
+    default: ""
   deployment_variant:
     description: "Deployment variant, which allows launching multiple deployments per PR (4 chars max)"
     required: false
     default: ""
+  image:
+    description: "Instance image (Hetzner only; ignored by AWS)"
+    required: false
+    default: "ubuntu-24.04"
   provider:
-    description: "Cloud provider to use: lightsail"
+    description: "Cloud provider to use: lightsail, hetzner"
     required: false
     default: "lightsail"
   registries:
@@ -158,6 +166,8 @@ runs:
           --default-port "${{ inputs.default_port }}" \
           --always-on "${{ inputs.always_on }}" \
           --instance-type "${{ inputs.instance_type }}" \
+          --region "${{ inputs.region }}" \
+          --image "${{ inputs.image }}" \
           --deployment-variant "${{ inputs.deployment_variant }}" \
           --registries "${{ inputs.registries }}" \
           --proxy-tls "${{ inputs.proxy_tls }}" \
