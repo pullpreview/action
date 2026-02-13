@@ -1,3 +1,5 @@
+The changelog is published on the project releases page and is the canonical source for release notes: https://github.com/pullpreview/action/releases
+
 ## v6.0.0
 
 ### Breaking changes
