@@ -275,6 +275,9 @@ func TestHetznerLabelSanitizationAndListMatching(t *testing.T) {
 			"org_name":           "pullpreview/ORG",
 			"version":            "1.2.3+meta",
 			"stack":              "pullpreview",
+			"_invalid":           "_leading",
+			"valid":              "-abc_123-",
+			"longvalue":          strings.Repeat("a", 100),
 		},
 	})
 	if err != nil {
@@ -294,6 +297,15 @@ func TestHetznerLabelSanitizationAndListMatching(t *testing.T) {
 	}
 	if got := client.serverCreateLastOpts.Labels["version"]; got != "1.2.3-meta" {
 		t.Fatalf("version label not sanitized: %q", got)
+	}
+	if got := client.serverCreateLastOpts.Labels["invalid"]; got != "leading" {
+		t.Fatalf("leading edge chars not trimmed in key: %q", got)
+	}
+	if got := client.serverCreateLastOpts.Labels["valid"]; got != "abc_123" {
+		t.Fatalf("leading/trailing edge chars not trimmed: %q", got)
+	}
+	if got := client.serverCreateLastOpts.Labels["longvalue"]; got != strings.Repeat("a", 63) {
+		t.Fatalf("long value should be truncated to 63 chars, got %q", got)
 	}
 
 	// Verify list matching still works when caller passes unsanitized tags.
@@ -723,6 +735,9 @@ func mustNewProviderWithContext(t *testing.T, cfg Config) *Provider {
 }
 
 func makeTestServer(name, ip string, status hcloud.ServerStatus, serverType *hcloud.ServerType) *hcloud.Server {
+	if serverType == nil {
+		serverType = &hcloud.ServerType{Name: "cpx21"}
+	}
 	return &hcloud.Server{
 		Name:       name,
 		Status:     status,

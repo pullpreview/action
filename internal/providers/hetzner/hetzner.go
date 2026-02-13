@@ -38,7 +38,7 @@ var hetznerLabelSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 const (
 	hetznerLabelMaxKeyLength   = 63
-	hetznerLabelMaxValueLength = 255
+	hetznerLabelMaxValueLength = 63
 )
 
 type hcloudClient interface {
@@ -1104,14 +1104,35 @@ func sanitizeHetznerLabelPart(value string, maxLen int) string {
 		return ""
 	}
 	value = hetznerLabelSanitizer.ReplaceAllString(value, "-")
-	value = strings.Trim(value, "-._")
+	value = trimHetznerLabelEdges(value)
 	if value == "" {
 		return ""
 	}
 	if len(value) > maxLen {
-		return value[:maxLen]
+		value = value[:maxLen]
+		value = trimHetznerLabelEdges(value)
+	}
+	if value == "" {
+		return ""
+	}
+	if !isHetznerLabelAlnum(rune(value[0])) || !isHetznerLabelAlnum(rune(value[len(value)-1])) {
+		return ""
 	}
 	return value
+}
+
+func trimHetznerLabelEdges(value string) string {
+	for len(value) > 0 && !isHetznerLabelAlnum(rune(value[0])) {
+		value = value[1:]
+	}
+	for len(value) > 0 && !isHetznerLabelAlnum(rune(value[len(value)-1])) {
+		value = value[:len(value)-1]
+	}
+	return value
+}
+
+func isHetznerLabelAlnum(value rune) bool {
+	return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9')
 }
 
 func mergeLabels(base, extra map[string]string) map[string]string {
