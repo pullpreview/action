@@ -249,6 +249,71 @@ func TestCachePathAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHetznerLabelSanitizationAndListMatching(t *testing.T) {
+	provider := mustNewProviderWithContext(t, Config{
+		APIToken:        "token",
+		Location:        defaultHetznerLocation,
+		Image:           defaultHetznerImage,
+		ServerType:      defaultHetznerServerType,
+		SSHUsername:     defaultHetznerSSHUser,
+		SSHKeysCacheDir: t.TempDir(),
+	})
+	instance := "gh-255978101-pr-122"
+	key := mustTestSSHKey(33)
+	created := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
+	client := &fakeHcloudClient{
+		sshKeyCreateResult: key,
+		serverCreateResult: hcloud.ServerCreateResult{Server: created},
+	}
+	provider.client = client
+
+	_, err := provider.Launch(instance, pullpreview.LaunchOptions{
+		Tags: map[string]string{
+			"pullpreview_repo":   "pullpreview/action",
+			"pullpreview_branch": "feature/add-ssl/path",
+			"repo_name":          "pull-preview/action",
+			"org_name":           "pullpreview/ORG",
+			"version":            "1.2.3+meta",
+			"stack":              "pullpreview",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Launch() error: %v", err)
+	}
+	if client.serverCreateLastOpts == nil {
+		t.Fatalf("expected captured server create opts")
+	}
+	if got := client.serverCreateLastOpts.Labels["pullpreview_repo"]; got != "pullpreview-action" {
+		t.Fatalf("pullpreview_repo label not sanitized: %q", got)
+	}
+	if got := client.serverCreateLastOpts.Labels["pullpreview_branch"]; got != "feature-add-ssl-path" {
+		t.Fatalf("pullpreview_branch label not sanitized: %q", got)
+	}
+	if got := client.serverCreateLastOpts.Labels["org_name"]; got != "pullpreview-org" {
+		t.Fatalf("org_name label not sanitized: %q", got)
+	}
+	if got := client.serverCreateLastOpts.Labels["version"]; got != "1.2.3-meta" {
+		t.Fatalf("version label not sanitized: %q", got)
+	}
+
+	// Verify list matching still works when caller passes unsanitized tags.
+	server := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
+	server.Labels = client.serverCreateLastOpts.Labels
+	client.serverListResponses = [][]*hcloud.Server{{server}}
+	instances, err := provider.ListInstances(map[string]string{
+		"pullpreview_repo":   "pullpreview/action",
+		"pullpreview_branch": "feature/add-ssl/path",
+		"org_name":           "pullpreview/ORG",
+		"version":            "1.2.3+meta",
+	})
+	if err != nil {
+		t.Fatalf("ListInstances() error: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one matching instance, got %d", len(instances))
+	}
+}
+
 func TestHetznerLaunchLifecycleRecreateWhenCacheMissing(t *testing.T) {
 	cacheDir := t.TempDir()
 	provider := mustNewProviderWithContext(t, Config{
@@ -497,8 +562,9 @@ type fakeHcloudClient struct {
 	sshKeyByID         map[int64]*hcloud.SSHKey
 	sshKeyGetByIDError error
 
-	serverCreateResult hcloud.ServerCreateResult
-	serverCreateError  error
+	serverCreateResult   hcloud.ServerCreateResult
+	serverCreateError    error
+	serverCreateLastOpts *hcloud.ServerCreateOpts
 
 	serverDeleteResult *hcloud.ServerDeleteResult
 	serverDeleteError  error
@@ -573,6 +639,7 @@ func (f *fakeHcloudClient) ServerList(ctx context.Context, opts hcloud.ServerLis
 
 func (f *fakeHcloudClient) ServerCreate(ctx context.Context, opts hcloud.ServerCreateOpts) (hcloud.ServerCreateResult, *hcloud.Response, error) {
 	f.serverCreateCalls++
+	f.serverCreateLastOpts = &opts
 	if f.serverCreateError != nil {
 		return hcloud.ServerCreateResult{}, nil, f.serverCreateError
 	}

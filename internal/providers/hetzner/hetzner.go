@@ -34,6 +34,12 @@ const (
 )
 
 var hetznerSSHKeyCacheFilenameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+var hetznerLabelSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+
+const (
+	hetznerLabelMaxKeyLength   = 63
+	hetznerLabelMaxValueLength = 255
+)
 
 type hcloudClient interface {
 	SSHKeyCreate(context.Context, hcloud.SSHKeyCreateOpts) (*hcloud.SSHKey, *hcloud.Response, error)
@@ -411,7 +417,7 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 	if err != nil {
 		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, nil, err)
 	}
-	labels := mergeLabels(map[string]string{"stack": pullpreview.StackName}, opts.Tags)
+	labels := sanitizeHetznerLabels(mergeLabels(map[string]string{"stack": pullpreview.StackName}, opts.Tags))
 
 	createOpts := hcloud.ServerCreateOpts{
 		Name:             name,
@@ -842,12 +848,13 @@ func (p *Provider) ListInstances(tags map[string]string) ([]pullpreview.Instance
 	if err != nil {
 		return nil, err
 	}
+	sanitizedTags := sanitizeHetznerLabels(tags)
 	instances := []pullpreview.InstanceSummary{}
 	for _, server := range servers {
 		if server == nil {
 			continue
 		}
-		if !matchLabels(server.Labels, tags) {
+		if !matchLabels(server.Labels, sanitizedTags) {
 			continue
 		}
 		publicIP := ""
@@ -1070,6 +1077,41 @@ func labelsOrEmpty(input map[string]string) map[string]string {
 		copied[k] = v
 	}
 	return copied
+}
+
+func sanitizeHetznerLabels(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return map[string]string{}
+	}
+	sanitized := map[string]string{}
+	for key, value := range input {
+		sanitizedKey := sanitizeHetznerLabelPart(key, hetznerLabelMaxKeyLength)
+		sanitizedValue := sanitizeHetznerLabelPart(value, hetznerLabelMaxValueLength)
+		if sanitizedKey == "" || sanitizedValue == "" {
+			continue
+		}
+		sanitized[sanitizedKey] = sanitizedValue
+	}
+	return sanitized
+}
+
+func sanitizeHetznerLabelPart(value string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	value = hetznerLabelSanitizer.ReplaceAllString(value, "-")
+	value = strings.Trim(value, "-._")
+	if value == "" {
+		return ""
+	}
+	if len(value) > maxLen {
+		return value[:maxLen]
+	}
+	return value
 }
 
 func mergeLabels(base, extra map[string]string) map[string]string {
