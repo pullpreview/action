@@ -363,6 +363,12 @@ func TestHetznerLabelSanitizationAndListMatching(t *testing.T) {
 		SSHUsername:     defaultHetznerSSHUser,
 		SSHKeysCacheDir: t.TempDir(),
 	})
+	originalRunSSHCommand := runSSHCommand
+	defer func() { runSSHCommand = originalRunSSHCommand }()
+	runSSHCommand = func(context.Context, string, string, string, string) ([]byte, error) {
+		return []byte("ok"), nil
+	}
+
 	instance := "gh-255978101-pr-122"
 	key := mustTestSSHKey(33)
 	created := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
