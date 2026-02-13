@@ -229,6 +229,8 @@ type Provider struct {
 	caSigner        ssh.Signer
 	caPublicKey     string
 	sshKeysCacheDir string
+	sshRetryCount   int
+	sshRetryDelay   time.Duration
 	logger          *pullpreview.Logger
 }
 
@@ -263,6 +265,8 @@ func newProviderWithContext(ctx context.Context, cfg Config, logger *pullpreview
 		caSigner:        caSigner,
 		caPublicKey:     caPublicKey,
 		sshKeysCacheDir: cfg.SSHKeysCacheDir,
+		sshRetryCount:   defaultHetznerSSHRetries,
+		sshRetryDelay:   defaultHetznerSSHInterval,
 		logger:          logger,
 	}, nil
 }
@@ -511,7 +515,15 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 
 func (p *Provider) validateSSHAccessWithRetry(server *hcloud.Server, privateKey, certKey string, attempts int) error {
 	if attempts <= 0 {
-		attempts = 1
+		if p.sshRetryCount > 0 {
+			attempts = p.sshRetryCount
+		} else {
+			attempts = 1
+		}
+	}
+	delay := p.sshRetryDelay
+	if delay <= 0 {
+		delay = defaultHetznerSSHInterval
 	}
 	var lastErr error
 	for i := 0; i < attempts; i++ {
@@ -524,7 +536,7 @@ func (p *Provider) validateSSHAccessWithRetry(server *hcloud.Server, privateKey,
 			if p.logger != nil {
 				p.logger.Warnf("SSH access validation failed for %q (attempt %d/%d): %v", strings.TrimSpace(server.Name), i+1, attempts, lastErr)
 			}
-			time.Sleep(defaultHetznerSSHInterval)
+			time.Sleep(delay)
 		}
 	}
 	return fmt.Errorf("ssh access validation failed for %q after %d attempts: %w", strings.TrimSpace(server.Name), attempts, lastErr)

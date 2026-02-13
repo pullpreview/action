@@ -502,6 +502,8 @@ func TestHetznerLaunchLifecycleRecreateWhenCacheMissing(t *testing.T) {
 		}
 		return []byte("ok"), nil
 	}
+	provider.sshRetryCount = 1
+	provider.sshRetryDelay = 1 * time.Millisecond
 
 	_, err := provider.Launch(instance, pullpreview.LaunchOptions{})
 	if err != nil {
@@ -579,6 +581,8 @@ func TestHetznerCreateLifecycleRecreateWhenSSHPrecheckFails(t *testing.T) {
 	runSSHCommand = func(context.Context, string, string, string, string) ([]byte, error) {
 		return nil, fmt.Errorf("ssh unavailable")
 	}
+	provider.sshRetryCount = 1
+	provider.sshRetryDelay = 1 * time.Millisecond
 
 	_, err := provider.Launch(instance, pullpreview.LaunchOptions{})
 	if err == nil {
