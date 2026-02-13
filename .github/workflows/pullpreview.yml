@@ -169,5 +169,5 @@ jobs:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
           HETZNER_LOCATION: "nbg1"
           HETZNER_IMAGE: "ubuntu-24.04"
-          HETZNER_SERVER_TYPE: "cpx21"
+          HETZNER_SERVER_TYPE: "cpx11"
           HETZNER_USERNAME: "root"
