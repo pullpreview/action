@@ -2,3 +2,4 @@
 .env*
 tempkey
 .DS_Store
+goreleaser-dist/

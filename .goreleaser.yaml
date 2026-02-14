@@ -2,6 +2,9 @@ version: 2
 
 project_name: pullpreview
 
+# Keep release artifacts separate from the action's tracked bundled binary.
+dist: goreleaser-dist
+
 builds:
   - id: pullpreview
     main: ./cmd/pullpreview
