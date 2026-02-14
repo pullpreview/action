@@ -236,7 +236,7 @@ pullpreview list my-org/my-repo
 pullpreview down --name pullpreview-local-smoke
 ```
 
-For installation details and local validation instructions (including Hetzner env setup), see [wiki/CLI.md](wiki/CLI.md).
+For installation details and local validation instructions (including Hetzner env setup), see [CLI wiki page](https://github.com/pullpreview/action/wiki/CLI).
 
 ## Is this free?
 
