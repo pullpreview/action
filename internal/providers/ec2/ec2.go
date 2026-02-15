@@ -255,6 +255,7 @@ func (p *Provider) BuildUserData(options pullpreview.UserDataOptions) (string, e
 		"  echo 'unsupported OS family; expected dnf, yum, or apt'",
 		"  exit 1",
 		"fi",
+		fmt.Sprintf("usermod -aG docker %s || true", options.Username),
 		"mkdir -p /etc/ssh/sshd_config.d",
 		fmt.Sprintf("cat <<'EOF' > /etc/ssh/pullpreview-user-ca.pub\n%s\nEOF", p.caPublicKey),
 		"cat <<'EOF' > /etc/ssh/sshd_config.d/pullpreview.conf",
