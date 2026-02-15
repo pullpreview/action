@@ -136,7 +136,7 @@ var runSSHCommand = func(ctx context.Context, keyFile, certFile, user, host stri
 	}
 	args = append(args,
 		fmt.Sprintf("%s@%s", user, host),
-		"echo", "ok",
+		"sh", "-lc", "test -f /etc/pullpreview/ready && docker info >/dev/null 2>&1",
 	)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	return cmd.CombinedOutput()
