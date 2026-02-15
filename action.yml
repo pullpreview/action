@@ -50,9 +50,9 @@ inputs:
     required: false
     default: ""
   instance_type:
-    description: "Instance type to use"
+    description: "Instance type to use (provider-specific)"
     required: false
-    default: "small"
+    default: ""
   region:
     description: "Provider region (AWS region or Hetzner location), overrides provider defaults"
     required: false
@@ -62,11 +62,11 @@ inputs:
     required: false
     default: ""
   image:
-    description: "Instance image (Hetzner only; ignored by AWS)"
+    description: "Provider image selector (Hetzner image name, or EC2 AMI ID/name prefix)"
     required: false
-    default: "ubuntu-24.04"
+    default: ""
   provider:
-    description: "Cloud provider to use: lightsail, hetzner"
+    description: "Cloud provider to use: lightsail, hetzner, ec2"
     required: false
     default: "lightsail"
   registries:

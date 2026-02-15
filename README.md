@@ -13,7 +13,7 @@ is made to Pull Requests labelled with the `pullpreview` label.
 When triggered, it will:
 
 1. Check out the repository code
-2. Provision a preview instance (Lightsail by default, or Hetzner with `provider: hetzner`), with docker and docker-compose set up
+2. Provision a preview instance (Lightsail by default, or `provider: hetzner` / `provider: ec2`), with docker and docker-compose set up
 3. Continuously deploy the specified pull requests using your docker-compose file(s)
 4. Report the preview instance URL in the GitHub UI
 
@@ -118,11 +118,11 @@ All supported `with:` inputs from `action.yml`:
 | `compose_files` | `docker-compose.yml` | Comma-separated Compose files passed to deploy. |
 | `compose_options` | `--build` | Additional options appended to `docker compose up`. |
 | `license` | `""` | PullPreview license key. |
-| `instance_type` | `small` | Provider-specific instance size (`small` for Lightsail, `cpx21` for Hetzner). |
+| `instance_type` | `""` | Provider-specific instance size (defaults: Lightsail `small`, Hetzner `cpx21`, EC2 `t3.small`). |
 | `region` | `` | Optional provider region/datacenter override (`AWS_REGION`/Hetzner location). If empty, provider defaults apply. |
-| `image` | `ubuntu-24.04` | Instance image for Hetzner (provider-specific) and ignored for AWS. |
+| `image` | `""` | Provider image selector: Hetzner image name, or EC2 AMI ID / AMI name prefix. |
 | `deployment_variant` | `""` | Optional short suffix to run multiple preview environments per PR (max 4 chars). |
-| `provider` | `lightsail` | Cloud provider (`lightsail`, `hetzner`). |
+| `provider` | `lightsail` | Cloud provider (`lightsail`, `hetzner`, `ec2`). |
 | `registries` | `""` | Private registry credentials, e.g. `docker://user:password@ghcr.io`. |
 | `proxy_tls` | `""` | Automatic HTTPS forwarding with Caddy + Let's Encrypt (`service:port`, e.g. `web:80`). |
 | `pre_script` | `""` | Path to a local shell script (relative to `app_path`) executed inline over SSH before compose deploy (should be self-contained). |
@@ -133,8 +133,11 @@ Notes:
 - `proxy_tls` forces URL/output/comment links to HTTPS on port `443`, injects a Caddy proxy service, and suppresses firewall exposure for port `80`. **When using `proxy_tls`, it is strongly recommended to set `dns` to a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain) or one of the built-in `revN.click` alternatives** to avoid hitting shared Let's Encrypt rate limits on `my.preview.run`.
 - `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
 - SSH key fetches are cached between runs in the action cache.
-- For Hetzner, configure credentials and defaults via action inputs and environment: `HCLOUD_TOKEN` (required), `HETZNER_CA_KEY` (required), optional `region` and `image` (`region` defaults to `nbg1`, `image` defaults to `ubuntu-24.04`). `instance_type` defaults to `cpx21` when provider is Hetzner.
-- `HETZNER_CA_KEY` must be an SSH private key (RSA or Ed25519) for the instance-access CA. PullPreview signs a per-run ephemeral login key with this CA key and uses SSH certificates (`...-cert.pub`) instead of reusing a persistent private key across runs.
+- CA key env is `PULLPREVIEW_CA_KEY` (canonical). For Hetzner, legacy `HETZNER_CA_KEY` is still accepted if canonical is unset.
+- For Hetzner, configure credentials and defaults via action inputs and environment: `HCLOUD_TOKEN` (required), `PULLPREVIEW_CA_KEY` (required; legacy `HETZNER_CA_KEY` fallback), optional `region` and `image` (`region` defaults to `nbg1`, `image` defaults to `ubuntu-24.04`). `instance_type` defaults to `cpx21` when provider is Hetzner.
+- For EC2, configure AWS credentials plus `PULLPREVIEW_CA_KEY` and set `provider: ec2`. PullPreview requires a pre-existing public subnet tagged `pullpreview-enabled=true` in the selected region.
+- For EC2 `image`: when `image` starts with `ami-`, it is used directly. Otherwise `image` is treated as an AMI name prefix and PullPreview selects the newest available match from owners `self` + `amazon`. If `image` is empty, PullPreview uses the default Amazon Linux 2023 prefix.
+- `PULLPREVIEW_CA_KEY` must be an SSH private key (RSA or Ed25519) for the instance-access CA. PullPreview signs a per-run ephemeral login key with this CA key and uses SSH certificates (`...-cert.pub`) instead of reusing a persistent private key across runs.
 - Generate a CA key once for your repository secret:
 
 ```bash
@@ -142,7 +145,7 @@ ssh-keygen -t rsa -b 3072 -m PEM -N "" -f hetzner_ca_key
 ```
 
 - **Let's Encrypt rate limits**: Let's Encrypt allows a maximum of [50 certificates per registered domain per week](https://letsencrypt.org/docs/rate-limits/#new-certificates-per-registered-domain). If you use `proxy_tls` and hit this limit on the default `my.preview.run` domain, switch to one of the built-in alternatives: `rev1.click`, `rev2.click`, ... `rev9.click`. Set `dns: rev1.click` in your workflow inputs. You can also use a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain).
-- For local CLI runs, set `HCLOUD_TOKEN` and `HETZNER_CA_KEY` (for example via `.env`) when using `provider: hetzner` to avoid relying on action inputs.
+- For local CLI runs, set provider-specific credentials plus `PULLPREVIEW_CA_KEY` (for example via `.env`).
 
 ## Example
 
@@ -221,8 +224,37 @@ jobs:
           ttl: 1h
         env:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
-          HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"
+          PULLPREVIEW_CA_KEY: "${{ secrets.PULLPREVIEW_CA_KEY }}"
 
+```
+
+## EC2 example
+
+```yaml
+# .github/workflows/pullpreview-ec2.yml
+name: PullPreview
+on:
+  pull_request:
+    types: [labeled, unlabeled, synchronize, closed, reopened, opened]
+
+jobs:
+  deploy_ec2:
+    runs-on: ubuntu-slim
+    if: github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pullpreview/action@v6
+        with:
+          provider: ec2
+          # optional: AMI ID or AMI name prefix
+          image: al2023-ami-2023
+          # optional: raw EC2 instance type
+          instance_type: t3.small
+        env:
+          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          AWS_REGION: "us-east-1"
+          PULLPREVIEW_CA_KEY: "${{ secrets.PULLPREVIEW_CA_KEY }}"
 ```
 
 ## CLI usage (installed binary)

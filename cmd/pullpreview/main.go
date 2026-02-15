@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/pullpreview/action/internal/providers"
+	_ "github.com/pullpreview/action/internal/providers/ec2"
 	_ "github.com/pullpreview/action/internal/providers/hetzner"
 	_ "github.com/pullpreview/action/internal/providers/lightsail"
 	"github.com/pullpreview/action/internal/pullpreview"
@@ -199,7 +200,7 @@ func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 	fs.StringVar(&values.options.ProxyTLS, "proxy-tls", "", "Enable automatic HTTPS proxying with Let's Encrypt (format: service:port, e.g. web:80)")
 	fs.StringVar(&values.options.DNS, "dns", "my.preview.run", "DNS suffix to use")
 	fs.StringVar(&values.ports, "ports", "80/tcp,443/tcp", "Ports to open for external access")
-	fs.StringVar(&values.options.InstanceType, "instance-type", "small", "Instance type to use")
+	fs.StringVar(&values.options.InstanceType, "instance-type", "", "Instance type to use")
 	fs.StringVar(&values.options.DefaultPort, "default-port", "80", "Default port for URL")
 	fs.Var(&values.tags, "tags", "Tags to add to the instance (key:value), comma-separated")
 	fs.StringVar(&values.composeFiles, "compose-files", "docker-compose.yml", "Compose files to use")
