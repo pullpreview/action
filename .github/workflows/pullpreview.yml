@@ -161,4 +161,64 @@ jobs:
           ttl: 1h
         env:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
-          HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"
+          PULLPREVIEW_CA_KEY: "${{ secrets.PULLPREVIEW_CA_KEY || secrets.HETZNER_CA_KEY }}"
+
+  deploy_smoke_ec2:
+    runs-on: ubuntu-slim
+    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy smoke app on EC2
+        id: pullpreview
+        uses: "./"
+        with:
+          admins: "@collaborators/push"
+          app_path: ./examples/workflow-smoke
+          provider: ec2
+          region: us-east-1
+          image: al2023-ami-2023
+          instance_type: t3.small
+          dns: rev3.click
+          max_domain_length: 30
+          # required here because the mysql image is private in GHCR
+          registries: docker://${{ secrets.GHCR_PAT }}@ghcr.io
+          proxy_tls: web:8080
+          ttl: 1h
+        env:
+          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          AWS_REGION: "us-east-1"
+          PULLPREVIEW_CA_KEY: "${{ secrets.PULLPREVIEW_CA_KEY || secrets.HETZNER_CA_KEY }}"
+
+      - name: Assert deploy and seed state on EC2
+        if: steps.pullpreview.outputs.live == 'true'
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${PREVIEW_URL}" != https://* ]]; then
+            echo "::error::Expected https preview URL when proxy_tls is enabled, got ${PREVIEW_URL}"
+            exit 1
+          fi
+
+          response=""
+          for attempt in $(seq 1 60); do
+            response="$(curl -fsSL --max-time 15 "${PREVIEW_URL}" || true)"
+            if printf '%s' "${response}" | grep -q 'Hello World Deploy 1' && \
+              printf '%s' "${response}" | grep -q 'seed_count=1' && \
+              printf '%s' "${response}" | grep -q 'seed_label=persisted'; then
+              echo "EC2 smoke checks passed for ${PREVIEW_URL}"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/60: waiting for EC2 smoke response from ${PREVIEW_URL}"
+            sleep 5
+          done
+
+          echo "::error::Unexpected response from ${PREVIEW_URL}"
+          printf '%s\n' "${response}"
+          exit 1

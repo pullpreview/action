@@ -2,11 +2,7 @@ package hetzner
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -22,6 +18,7 @@ import (
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/pullpreview/action/internal/providers"
+	"github.com/pullpreview/action/internal/providers/sshca"
 	"github.com/pullpreview/action/internal/pullpreview"
 )
 
@@ -147,6 +144,8 @@ type Config struct {
 	Location        string
 	Image           string
 	CAKey           string
+	CAKeyEnv        string
+	UsedLegacyCAKey bool
 	SSHUsername     string
 	SSHKeysCacheDir string
 }
@@ -172,7 +171,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("HCLOUD_TOKEN is required")
 	}
 	if strings.TrimSpace(c.CAKey) == "" {
-		return fmt.Errorf("HETZNER_CA_KEY is required")
+		return fmt.Errorf("PULLPREVIEW_CA_KEY is required (legacy HETZNER_CA_KEY is also supported for provider=hetzner)")
 	}
 	if strings.TrimSpace(c.Location) == "" {
 		return fmt.Errorf("location is required")
@@ -193,7 +192,8 @@ func ParseConfigFromEnv(env map[string]string) (pullpreview.ProviderConfig, erro
 	if image == "" {
 		image = defaultHetznerImage
 	}
-	caKey := strings.TrimSpace(env["HETZNER_CA_KEY"])
+	caResolution := sshca.ResolveFromEnv(env, "PULLPREVIEW_CA_KEY", "HETZNER_CA_KEY")
+	caKey := strings.TrimSpace(caResolution.Value)
 	sshUser := defaultHetznerSSHUser
 	sshKeysCacheDir := strings.TrimSpace(env["PULLPREVIEW_SSH_KEYS_CACHE_DIR"])
 	cfg := Config{
@@ -201,10 +201,12 @@ func ParseConfigFromEnv(env map[string]string) (pullpreview.ProviderConfig, erro
 		Location:        location,
 		Image:           image,
 		CAKey:           caKey,
+		CAKeyEnv:        caResolution.EnvKey,
+		UsedLegacyCAKey: caResolution.UsedLegacy,
 		SSHUsername:     sshUser,
 		SSHKeysCacheDir: sshKeysCacheDir,
 	}
-	if _, _, _, _, err := parseHetznerCAKey(caKey); err != nil {
+	if _, _, _, _, err := parseHetznerCAKey(caKey, cfg.CAKeyEnv); err != nil {
 		return cfg, err
 	}
 	return cfg, cfg.Validate()
@@ -249,11 +251,14 @@ func newProviderWithContext(ctx context.Context, cfg Config, logger *pullpreview
 	if client == nil {
 		return nil, fmt.Errorf("client cannot be nil")
 	}
-	caSigner, caPublicKey, caSource, _, err := parseHetznerCAKey(cfg.CAKey)
+	caSigner, caPublicKey, caSource, _, err := parseHetznerCAKey(cfg.CAKey, cfg.CAKeyEnv)
 	if err != nil {
 		return nil, err
 	}
 	if logger != nil {
+		if cfg.UsedLegacyCAKey {
+			logger.Warnf("HETZNER_CA_KEY is deprecated; use PULLPREVIEW_CA_KEY instead")
+		}
 		logger.Infof("Hetzner SSH CA pre-check passed (%s)", caSource)
 	}
 	return &Provider{
@@ -827,78 +832,22 @@ func (p *Provider) generateSignedAccessCredentials() (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	cert, err := generateUserCertificate(p.caSigner, signer, p.sshUser, defaultHetznerSSHCertTTL)
+	cert, err := sshca.GenerateUserCertificate(p.caSigner, signer, p.sshUser, defaultHetznerSSHCertTTL)
 	if err != nil {
 		return "", "", err
 	}
 	return privateKey, cert, nil
 }
 
-func generateUserCertificate(caSigner ssh.Signer, userSigner ssh.Signer, principal string, ttl time.Duration) (string, error) {
-	if caSigner == nil {
-		return "", fmt.Errorf("missing CA signer")
+func parseHetznerCAKey(raw string, envName string) (ssh.Signer, string, string, bool, error) {
+	if strings.TrimSpace(envName) == "" {
+		envName = "PULLPREVIEW_CA_KEY"
 	}
-	if userSigner == nil {
-		return "", fmt.Errorf("missing user signer")
-	}
-	publicKey := userSigner.PublicKey()
-	if publicKey == nil {
-		return "", fmt.Errorf("user signer has no public key")
-	}
-	cert := &ssh.Certificate{
-		Key:             publicKey,
-		Serial:          uint64(time.Now().UnixNano()),
-		CertType:        ssh.UserCert,
-		KeyId:           fmt.Sprintf("pullpreview-%s-%d", sanitizeNameForHetzner(principal), time.Now().UnixNano()),
-		ValidPrincipals: []string{principal},
-		ValidAfter:      uint64(time.Now().Add(-time.Minute).Unix()),
-		ValidBefore:     uint64(time.Now().Add(ttl).Unix()),
-	}
-	if err := cert.SignCert(rand.Reader, caSigner); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(cert))), nil
-}
-
-func parseHetznerCAKey(raw string) (ssh.Signer, string, string, bool, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, "", "", false, fmt.Errorf("HETZNER_CA_KEY is required")
-	}
-
-	caSource := "inline HETZNER_CA_KEY"
-	caSourceFromFile := false
-	data := []byte(raw)
-
-	if info, err := os.Stat(raw); err == nil {
-		if info.IsDir() {
-			return nil, "", "", false, fmt.Errorf("HETZNER_CA_KEY %q refers to a directory", raw)
-		}
-		caSource = raw
-		caSourceFromFile = true
-		data, err = os.ReadFile(raw)
-		if err != nil {
-			return nil, "", "", false, fmt.Errorf("failed to read HETZNER_CA_KEY from %q: %w", raw, err)
-		}
-	}
-
-	signer, err := ssh.ParsePrivateKey(data)
+	parsed, err := sshca.Parse(raw, envName)
 	if err != nil {
-		prefix := "inline HETZNER_CA_KEY"
-		if caSourceFromFile {
-			prefix = fmt.Sprintf("HETZNER_CA_KEY file %q", caSource)
-		}
-		return nil, "", caSource, caSourceFromFile, fmt.Errorf("invalid %s: %w", prefix, err)
+		return nil, "", "", false, err
 	}
-	publicKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
-	if publicKey == "" {
-		errPrefix := "inline HETZNER_CA_KEY"
-		if caSourceFromFile {
-			errPrefix = fmt.Sprintf("HETZNER_CA_KEY file %q", caSource)
-		}
-		return nil, "", caSource, caSourceFromFile, fmt.Errorf("invalid %s: unable to derive public key", errPrefix)
-	}
-	return signer, publicKey, caSource, caSourceFromFile, nil
+	return parsed.Signer, parsed.PublicKey, parsed.Source, parsed.SourceFromFile, nil
 }
 
 func (p *Provider) cachePath(name string) string {
@@ -1056,26 +1005,7 @@ func generateSSHKeyPair(_ string) (string, string, error) {
 }
 
 func generateSSHKeyPairWithSigner(_ string) (string, string, ssh.Signer, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return "", "", nil, err
-	}
-	private := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	})
-	if private == nil {
-		return "", "", nil, fmt.Errorf("unable to marshal private key")
-	}
-	public, err := ssh.NewPublicKey(&key.PublicKey)
-	if err != nil {
-		return "", "", nil, err
-	}
-	signer, err := ssh.NewSignerFromKey(key)
-	if err != nil {
-		return "", "", nil, err
-	}
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(public))), strings.TrimSpace(string(private)), signer, nil
+	return sshca.GenerateSSHKeyPairWithSigner()
 }
 
 func parseFirewallRules(ports, cidrs []string) ([]hcloud.FirewallRule, error) {

@@ -1,5 +1,5 @@
 GO ?= mise exec -- go
-GO_TEST ?= $(GO) test ./internal/providers ./internal/pullpreview ./internal/providers/hetzner
+GO_TEST ?= $(GO) test ./internal/providers ./internal/pullpreview ./internal/providers/hetzner ./internal/providers/ec2
 DIST_DIR := dist
 BIN_NAME := pullpreview
 GO_LDFLAGS ?= -s -w

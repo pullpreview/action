@@ -20,10 +20,10 @@ func TestParseConfigFromEnv(t *testing.T) {
 		t.Fatalf("failed to generate ca key: %v", err)
 	}
 	cfgRaw, err := ParseConfigFromEnv(map[string]string{
-		"HCLOUD_TOKEN":   "abc",
-		"REGION":         "fra1",
-		"IMAGE":          "debian-12",
-		"HETZNER_CA_KEY": caKey,
+		"HCLOUD_TOKEN":       "abc",
+		"REGION":             "fra1",
+		"IMAGE":              "debian-12",
+		"PULLPREVIEW_CA_KEY": caKey,
 	})
 	if err != nil {
 		t.Fatalf("ParseConfigFromEnv() error: %v", err)
@@ -54,6 +54,25 @@ func TestParseConfigFromEnv(t *testing.T) {
 	if cfg.Location != defaultHetznerLocation || cfg.Image != defaultHetznerImage || cfg.CAKey != caKeyFile || cfg.SSHUsername != defaultHetznerSSHUser {
 		t.Fatalf("expected defaults and file-backed CA key path, got %#v", cfg)
 	}
+	if !cfg.UsedLegacyCAKey {
+		t.Fatalf("expected legacy env fallback to be marked")
+	}
+
+	cfgRaw, err = ParseConfigFromEnv(map[string]string{
+		"HCLOUD_TOKEN":       "priority",
+		"PULLPREVIEW_CA_KEY": caKey,
+		"HETZNER_CA_KEY":     "not-a-key",
+	})
+	if err != nil {
+		t.Fatalf("ParseConfigFromEnv() with canonical priority error: %v", err)
+	}
+	cfg = cfgRaw.(Config)
+	if cfg.CAKey != caKey {
+		t.Fatalf("expected canonical CA key precedence, got %q", cfg.CAKey)
+	}
+	if cfg.UsedLegacyCAKey {
+		t.Fatalf("did not expect legacy marker when canonical env is present")
+	}
 
 	if _, err := ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback", "HETZNER_CA_KEY": ""}); err == nil {
 		t.Fatalf("expected missing CA key error")
@@ -61,10 +80,10 @@ func TestParseConfigFromEnv(t *testing.T) {
 	if _, err := ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback"}); err == nil {
 		t.Fatalf("expected missing CA key error")
 	}
-	if _, err := ParseConfigFromEnv(map[string]string{"HETZNER_CA_KEY": caKey}); err == nil {
+	if _, err := ParseConfigFromEnv(map[string]string{"PULLPREVIEW_CA_KEY": caKey}); err == nil {
 		t.Fatalf("expected missing token error")
 	}
-	if _, err := ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback", "HETZNER_CA_KEY": "not-a-key"}); err == nil {
+	if _, err := ParseConfigFromEnv(map[string]string{"HCLOUD_TOKEN": "fallback", "PULLPREVIEW_CA_KEY": "not-a-key"}); err == nil {
 		t.Fatalf("expected invalid CA key error")
 	}
 }
