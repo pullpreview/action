@@ -161,7 +161,7 @@ jobs:
           ttl: 1h
         env:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
-          PULLPREVIEW_CA_KEY: "${{ secrets.PULLPREVIEW_CA_KEY }}"
+          PULLPREVIEW_CA_KEY: "${{ secrets.PULLPREVIEW_CA_KEY || secrets.HETZNER_CA_KEY }}"
 
   deploy_smoke_ec2:
     runs-on: ubuntu-slim
@@ -190,7 +190,7 @@ jobs:
           AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
           AWS_REGION: "us-east-1"
-          PULLPREVIEW_CA_KEY: "${{ secrets.PULLPREVIEW_CA_KEY }}"
+          PULLPREVIEW_CA_KEY: "${{ secrets.PULLPREVIEW_CA_KEY || secrets.HETZNER_CA_KEY }}"
 
       - name: Assert deploy and seed state on EC2
         if: steps.pullpreview.outputs.live == 'true'
