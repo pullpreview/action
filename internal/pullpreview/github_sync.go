@@ -532,8 +532,10 @@ func (g *GithubSync) Sync() error {
 			return err
 		}
 		if upInstance != nil {
-			_ = g.updateGitHubStatus(statusDeployed, upInstance.URL())
-			g.writeStepSummary(statusDeployed, action, upInstance.URL(), upInstance)
+			displayURL := g.applyTemplatedURL(upInstance.URL())
+			_ = g.updateGitHubStatus(statusDeployed, displayURL)
+			g.writeStepSummary(statusDeployed, action, displayURL, upInstance)
+			g.writeTemplatedURLOutput(displayURL)
 		}
 	}
 	return nil
@@ -766,6 +768,30 @@ func (g *GithubSync) writeStepSummary(status deploymentStatus, action actionType
 	if _, err := f.WriteString(content + "\n"); err != nil && g.logger != nil {
 		g.logger.Warnf("Unable to write GITHUB_STEP_SUMMARY: %v", err)
 	}
+}
+
+func (g *GithubSync) applyTemplatedURL(rawURL string) string {
+	tpl := strings.TrimSpace(g.opts.TemplatedURL)
+	if tpl == "" {
+		return rawURL
+	}
+	return strings.ReplaceAll(tpl, "{{ pullpreview_url }}", rawURL)
+}
+
+func (g *GithubSync) writeTemplatedURLOutput(displayURL string) {
+	if strings.TrimSpace(g.opts.TemplatedURL) == "" {
+		return
+	}
+	path := os.Getenv("GITHUB_OUTPUT")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "url=%s\n", displayURL)
 }
 
 func (g *GithubSync) workflowRunURL() string {

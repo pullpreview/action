@@ -117,6 +117,7 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 	label := fs.String("label", "pullpreview", "Label to use for triggering preview deployments")
 	deploymentVariant := fs.String("deployment-variant", "", "Deployment variant (4 chars max)")
 	ttl := fs.String("ttl", "infinite", "Maximum time to live for deployments (e.g. 10h, 5d, infinite)")
+	templatedURL := fs.String("templated-url", "", "Template for the preview URL (use {{ pullpreview_url }} as placeholder)")
 	commonFlags := registerCommonFlags(fs)
 	leadingPath, parseArgs := splitLeadingPositional(args)
 	fs.Parse(parseArgs)
@@ -138,6 +139,7 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 		Label:             *label,
 		DeploymentVariant: *deploymentVariant,
 		TTL:               *ttl,
+		TemplatedURL:      *templatedURL,
 		Context:           ctx,
 		Common:            commonOptions,
 	}

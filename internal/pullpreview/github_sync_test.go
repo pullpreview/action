@@ -545,6 +545,69 @@ func TestRenderStepSummaryForDeployedState(t *testing.T) {
 	}
 }
 
+func TestApplyTemplatedURL(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	tests := []struct {
+		name         string
+		templatedURL string
+		rawURL       string
+		want         string
+	}{
+		{
+			name:         "empty template returns raw URL",
+			templatedURL: "",
+			rawURL:       "http://pr-1-ip-1-2-3-4.my.preview.run:80",
+			want:         "http://pr-1-ip-1-2-3-4.my.preview.run:80",
+		},
+		{
+			name:         "template with custom path",
+			templatedURL: "{{ pullpreview_url }}/custom/path?key=value",
+			rawURL:       "http://pr-1-ip-1-2-3-4.my.preview.run:80",
+			want:         "http://pr-1-ip-1-2-3-4.my.preview.run:80/custom/path?key=value",
+		},
+		{
+			name:         "template with encoded params",
+			templatedURL: "{{ pullpreview_url }}/abc?redirectTo=def%2Fghi",
+			rawURL:       "https://pr-1-ip-1-2-3-4.my.preview.run:443",
+			want:         "https://pr-1-ip-1-2-3-4.my.preview.run:443/abc?redirectTo=def%2Fghi",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sync := newSync(event, GithubSyncOptions{Label: "pullpreview", TemplatedURL: tt.templatedURL, Common: CommonOptions{}}, &fakeGitHub{}, fakeProvider{running: true})
+			got := sync.applyTemplatedURL(tt.rawURL)
+			if got != tt.want {
+				t.Fatalf("applyTemplatedURL()=%q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSyncLabeledWithTemplatedURLUsesTemplateInComment(t *testing.T) {
+	t.Setenv("PULLPREVIEW_TEST", "1")
+	t.Setenv("GITHUB_SERVER_URL", "https://github.com")
+	t.Setenv("GITHUB_RUN_ID", "12345")
+	t.Setenv("GITHUB_STEP_SUMMARY", filepath.Join(t.TempDir(), "summary.md"))
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
+	sync := newSync(event, GithubSyncOptions{
+		Label:        "pullpreview",
+		TemplatedURL: "{{ pullpreview_url }}/app?lang=en",
+		Common:       CommonOptions{},
+	}, client, fakeProvider{running: true})
+
+	if err := sync.Sync(); err != nil {
+		t.Fatalf("Sync() returned error: %v", err)
+	}
+	if len(client.updatedComments) == 0 {
+		t.Fatalf("expected PR comment update on deployed state")
+	}
+	lastComment := client.updatedComments[len(client.updatedComments)-1]
+	if !strings.Contains(lastComment, "/app?lang=en") {
+		t.Fatalf("expected templated URL with custom path in PR comment, got %q", lastComment)
+	}
+}
+
 func TestRunGithubSyncFromEnvironmentRunsDownForBranchPush(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	event := loadFixtureEvent(t, "github_event_push_solo_organization.json")
