@@ -124,6 +124,7 @@ type GithubSyncOptions struct {
 	Label             string
 	DeploymentVariant string
 	TTL               string
+	TemplatedURL      string
 	Context           context.Context
 	Common            CommonOptions
 }

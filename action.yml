@@ -101,6 +101,10 @@ inputs:
     description: "Path to a local bash script (relative to app_path) executed inline over SSH on the instance before docker compose"
     required: false
     default: ""
+  templated_url:
+    description: "Template for the preview URL displayed in PR comments and outputs (use {{ pullpreview_url }} as placeholder, e.g. {{ pullpreview_url }}/custom/path?key=value)"
+    required: false
+    default: ""
   ttl:
     description: "Maximum time to live for deployments (e.g. 10h, 5d, infinite)"
     required: false
@@ -193,7 +197,8 @@ runs:
           --registries "${{ inputs.registries }}" \
           --proxy-tls "${{ inputs.proxy_tls }}" \
           --pre-script "${{ inputs.pre_script }}" \
-          --ttl "${{ inputs.ttl }}"
+          --ttl "${{ inputs.ttl }}" \
+          --templated-url "${{ inputs.templated_url }}"
 
         if grep -q '^url=' "${GITHUB_OUTPUT}"; then
           echo "live=true" >> "${GITHUB_OUTPUT}"
