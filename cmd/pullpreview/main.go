@@ -95,6 +95,7 @@ func runDown(ctx context.Context, args []string, logger *pullpreview.Logger) {
 	fs := flag.NewFlagSet("down", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	name := fs.String("name", "", "Name of the environment to destroy")
+	providerName := fs.String("provider", "", "Cloud provider to use")
 	fs.Parse(args)
 	if *verbose {
 		logger.SetLevel(pullpreview.LevelDebug)
@@ -103,7 +104,7 @@ func runDown(ctx context.Context, args []string, logger *pullpreview.Logger) {
 		fmt.Println("Usage: pullpreview down --name <name>")
 		os.Exit(1)
 	}
-	provider := mustProvider(ctx, logger, pullpreview.CommonOptions{})
+	provider := mustProvider(ctx, logger, pullpreview.CommonOptions{ProviderName: *providerName})
 	if err := pullpreview.RunDown(pullpreview.DownOptions{Name: *name}, provider, logger); err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -151,6 +152,7 @@ func runList(ctx context.Context, args []string, logger *pullpreview.Logger) {
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	org := fs.String("org", "", "Restrict to given organization name")
 	repo := fs.String("repo", "", "Restrict to given repository name")
+	providerName := fs.String("provider", "", "Cloud provider to use")
 	leadingTarget, parseArgs := splitLeadingPositional(args)
 	fs.Parse(parseArgs)
 	if *verbose {
@@ -169,7 +171,7 @@ func runList(ctx context.Context, args []string, logger *pullpreview.Logger) {
 			*repo = parts[1]
 		}
 	}
-	provider := mustProvider(ctx, logger, pullpreview.CommonOptions{})
+	provider := mustProvider(ctx, logger, pullpreview.CommonOptions{ProviderName: *providerName})
 	if err := pullpreview.RunList(pullpreview.ListOptions{Org: *org, Repo: *repo}, provider, logger); err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -177,25 +179,32 @@ func runList(ctx context.Context, args []string, logger *pullpreview.Logger) {
 }
 
 type commonFlagValues struct {
-	region         string
-	image          string
-	admins         string
-	cidrs          string
-	registries     string
-	ports          string
-	composeFiles   string
-	composeOptions string
-	tags           multiValue
-	options        pullpreview.CommonOptions
+	provider        string
+	region          string
+	image           string
+	admins          string
+	cidrs           string
+	registries      string
+	ports           string
+	composeFiles    string
+	composeOptions  string
+	chart           string
+	chartRepository string
+	chartValues     string
+	chartSet        string
+	tags            multiValue
+	options         pullpreview.CommonOptions
 }
 
 func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 	values := &commonFlagValues{}
+	fs.StringVar(&values.provider, "provider", "", "Cloud provider to use")
 	fs.StringVar(&values.region, "region", "", "Provider region to use")
 	fs.StringVar(&values.image, "image", "", "Provider image to use")
 	fs.StringVar(&values.admins, "admins", "", "Logins of GitHub users that will have their SSH key installed on the instance")
 	fs.StringVar(&values.cidrs, "cidrs", "0.0.0.0/0", "CIDRs allowed to connect to the instance")
 	fs.StringVar(&values.registries, "registries", "", "URIs of docker registries to authenticate against")
+	fs.StringVar((*string)(&values.options.DeploymentTarget), "deployment-target", string(pullpreview.DeploymentTargetCompose), "Deployment target to use: compose or helm")
 	fs.StringVar(&values.options.ProxyTLS, "proxy-tls", "", "Enable automatic HTTPS proxying with Let's Encrypt (format: service:port, e.g. web:80)")
 	fs.StringVar(&values.options.DNS, "dns", "my.preview.run", "DNS suffix to use")
 	fs.StringVar(&values.ports, "ports", "80/tcp,443/tcp", "Ports to open for external access")
@@ -204,21 +213,31 @@ func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 	fs.Var(&values.tags, "tags", "Tags to add to the instance (key:value), comma-separated")
 	fs.StringVar(&values.composeFiles, "compose-files", "docker-compose.yml", "Compose files to use")
 	fs.StringVar(&values.composeOptions, "compose-options", "--build", "Additional options to pass to docker-compose up")
-	fs.StringVar(&values.options.PreScript, "pre-script", "", "Path to a bash script to run on the instance before docker compose")
+	fs.StringVar(&values.chart, "chart", "", "Helm chart path, name, or OCI reference")
+	fs.StringVar(&values.chartRepository, "chart-repository", "", "Helm repository URL to use with --chart")
+	fs.StringVar(&values.chartValues, "chart-values", "", "Comma-separated Helm values files relative to app_path")
+	fs.StringVar(&values.chartSet, "chart-set", "", "Comma-separated Helm --set overrides")
+	fs.StringVar(&values.options.PreScript, "pre-script", "", "Path to a bash script to run on the instance before deployment")
 	return values
 }
 
 func (c *commonFlagValues) ToOptions(ctx context.Context) pullpreview.CommonOptions {
 	opts := c.options
+	opts.ProviderName = strings.TrimSpace(c.provider)
 	opts.Region = strings.TrimSpace(c.region)
 	opts.Image = strings.TrimSpace(c.image)
 	opts.Context = ctx
+	opts.DeploymentTarget = pullpreview.NormalizeDeploymentTarget(string(c.options.DeploymentTarget))
 	opts.Admins = splitCommaList(c.admins)
 	opts.CIDRs = splitCommaList(c.cidrs)
 	opts.Registries = splitCommaList(c.registries)
 	opts.Ports = splitCommaList(c.ports)
 	opts.ComposeFiles = splitCommaList(c.composeFiles)
 	opts.ComposeOptions = splitCommaList(c.composeOptions)
+	opts.Chart = strings.TrimSpace(c.chart)
+	opts.ChartRepository = strings.TrimSpace(c.chartRepository)
+	opts.ChartValues = splitCommaList(c.chartValues)
+	opts.ChartSet = splitCommaList(c.chartSet)
 	opts.Tags = parseTags(c.tags)
 	return opts
 }
@@ -274,7 +293,10 @@ func splitLeadingPositional(args []string) (string, []string) {
 }
 
 func mustProvider(ctx context.Context, logger *pullpreview.Logger, common pullpreview.CommonOptions) pullpreview.Provider {
-	providerName := strings.TrimSpace(os.Getenv("PULLPREVIEW_PROVIDER"))
+	providerName := strings.TrimSpace(common.ProviderName)
+	if providerName == "" {
+		providerName = strings.TrimSpace(os.Getenv("PULLPREVIEW_PROVIDER"))
+	}
 	env := buildProviderEnv(common)
 	provider, _, err := providers.NewProvider(ctx, providerName, env, logger)
 	if err != nil {

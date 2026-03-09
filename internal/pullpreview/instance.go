@@ -29,30 +29,36 @@ func (r SystemRunner) Run(cmd *exec.Cmd) error {
 }
 
 type Instance struct {
-	Name            string
-	Subdomain       string
-	Admins          []string
-	AdminPublicKeys []string
-	Context         context.Context
-	CIDRs           []string
-	ComposeFiles    []string
-	ComposeOptions  []string
-	DefaultPort     string
-	DNS             string
-	Ports           []string
-	ProxyTLS        string
-	Provider        Provider
-	Registries      []string
-	Size            string
-	Tags            map[string]string
-	PreScript       string
-	Access          AccessDetails
-	Logger          *Logger
-	Runner          Runner
+	Name             string
+	Subdomain        string
+	Admins           []string
+	AdminPublicKeys  []string
+	Context          context.Context
+	DeploymentTarget DeploymentTarget
+	CIDRs            []string
+	ComposeFiles     []string
+	ComposeOptions   []string
+	Chart            string
+	ChartRepository  string
+	ChartValues      []string
+	ChartSet         []string
+	DefaultPort      string
+	DNS              string
+	Ports            []string
+	ProxyTLS         string
+	Provider         Provider
+	Registries       []string
+	Size             string
+	Tags             map[string]string
+	PreScript        string
+	Access           AccessDetails
+	Logger           *Logger
+	Runner           Runner
 }
 
 func NewInstance(name string, opts CommonOptions, provider Provider, logger *Logger) *Instance {
 	normalized := NormalizeName(name)
+	target := NormalizeDeploymentTarget(string(opts.DeploymentTarget))
 	defaultPort := defaultString(opts.DefaultPort, "80")
 	proxyTLS := strings.TrimSpace(opts.ProxyTLS)
 	if proxyTLS != "" {
@@ -62,25 +68,30 @@ func NewInstance(name string, opts CommonOptions, provider Provider, logger *Log
 		defaultPort = "443"
 	}
 	return &Instance{
-		Name:            normalized,
-		Subdomain:       NormalizeName(name),
-		Admins:          opts.Admins,
-		AdminPublicKeys: opts.AdminPublicKeys,
-		Context:         ensureContext(opts.Context),
-		CIDRs:           defaultSlice(opts.CIDRs, []string{"0.0.0.0/0"}),
-		ComposeFiles:    defaultSlice(opts.ComposeFiles, []string{"docker-compose.yml"}),
-		ComposeOptions:  defaultSlice(opts.ComposeOptions, []string{"--build"}),
-		DefaultPort:     defaultPort,
-		DNS:             defaultString(opts.DNS, "my.preview.run"),
-		Ports:           opts.Ports,
-		ProxyTLS:        proxyTLS,
-		Provider:        provider,
-		Registries:      opts.Registries,
-		Size:            opts.InstanceType,
-		Tags:            defaultMap(opts.Tags),
-		PreScript:       opts.PreScript,
-		Logger:          logger,
-		Runner:          SystemRunner{},
+		Name:             normalized,
+		Subdomain:        NormalizeName(name),
+		Admins:           opts.Admins,
+		AdminPublicKeys:  opts.AdminPublicKeys,
+		Context:          ensureContext(opts.Context),
+		DeploymentTarget: target,
+		CIDRs:            defaultSlice(opts.CIDRs, []string{"0.0.0.0/0"}),
+		ComposeFiles:     defaultSlice(opts.ComposeFiles, []string{"docker-compose.yml"}),
+		ComposeOptions:   defaultSlice(opts.ComposeOptions, []string{"--build"}),
+		Chart:            strings.TrimSpace(opts.Chart),
+		ChartRepository:  strings.TrimSpace(opts.ChartRepository),
+		ChartValues:      opts.ChartValues,
+		ChartSet:         opts.ChartSet,
+		DefaultPort:      defaultPort,
+		DNS:              defaultString(opts.DNS, "my.preview.run"),
+		Ports:            opts.Ports,
+		ProxyTLS:         proxyTLS,
+		Provider:         provider,
+		Registries:       opts.Registries,
+		Size:             opts.InstanceType,
+		Tags:             defaultMap(opts.Tags),
+		PreScript:        opts.PreScript,
+		Logger:           logger,
+		Runner:           SystemRunner{},
 	}
 }
 
@@ -112,6 +123,57 @@ func defaultMap(value map[string]string) map[string]string {
 	return value
 }
 
+func providerName(provider Provider) string {
+	if metadata, ok := provider.(ProviderMetadata); ok {
+		return strings.ToLower(strings.TrimSpace(metadata.Name()))
+	}
+	return ""
+}
+
+func sameStringSlice(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for idx := range got {
+		if strings.TrimSpace(got[idx]) != strings.TrimSpace(want[idx]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (i *Instance) ValidateDeploymentConfig() error {
+	if err := i.DeploymentTarget.Validate(); err != nil {
+		return err
+	}
+
+	switch i.DeploymentTarget {
+	case DeploymentTargetCompose:
+		if strings.TrimSpace(i.Chart) != "" || strings.TrimSpace(i.ChartRepository) != "" || len(i.ChartValues) > 0 || len(i.ChartSet) > 0 {
+			return fmt.Errorf("chart, chart_repository, chart_values, and chart_set require deployment_target=helm")
+		}
+	case DeploymentTargetHelm:
+		if name := providerName(i.Provider); name != "hetzner" {
+			return fmt.Errorf("deployment_target=helm currently requires provider=hetzner")
+		}
+		if strings.TrimSpace(i.Chart) == "" {
+			return fmt.Errorf("deployment_target=helm requires chart")
+		}
+		if strings.TrimSpace(i.ProxyTLS) == "" {
+			return fmt.Errorf("deployment_target=helm requires proxy_tls")
+		}
+		if len(i.ComposeFiles) > 0 && !sameStringSlice(i.ComposeFiles, []string{"docker-compose.yml"}) {
+			return fmt.Errorf("compose_files is unsupported with deployment_target=helm")
+		}
+		if len(i.ComposeOptions) > 0 && !sameStringSlice(i.ComposeOptions, []string{"--build"}) {
+			return fmt.Errorf("compose_options is unsupported with deployment_target=helm")
+		}
+	default:
+		return fmt.Errorf("unsupported deployment target %q", i.DeploymentTarget)
+	}
+	return nil
+}
+
 func (i *Instance) LaunchAndWait() error {
 	if i.Logger != nil {
 		i.Logger.Infof("Creating or restoring instance name=%s size=%s", i.Name, i.Size)
@@ -124,9 +186,10 @@ func (i *Instance) LaunchAndWait() error {
 	}.Script()
 	if provider, ok := i.Provider.(UserDataProvider); ok {
 		generatedUserData, err := provider.BuildUserData(UserDataOptions{
-			AppPath:       remoteAppPath,
-			SSHPublicKeys: i.SSHPublicKeys(),
-			Username:      i.Username(),
+			AppPath:          remoteAppPath,
+			DeploymentTarget: i.DeploymentTarget,
+			SSHPublicKeys:    i.SSHPublicKeys(),
+			Username:         i.Username(),
 		})
 		if err != nil {
 			return err
@@ -210,7 +273,7 @@ func (i *Instance) PortsWithDefaults() []string {
 	proxyTLSEnabled := strings.TrimSpace(i.ProxyTLS) != ""
 	ports := []string{}
 	for _, port := range i.Ports {
-		if proxyTLSEnabled && firewallRuleTargetsPort(port, 80) {
+		if proxyTLSEnabled && i.DeploymentTarget != DeploymentTargetHelm && firewallRuleTargetsPort(port, 80) {
 			continue
 		}
 		ports = append(ports, port)
@@ -317,6 +380,24 @@ func (i *Instance) appendRemoteFile(input io.Reader, target, mode string) error 
 	return i.SSH(command, input)
 }
 
+func (i *Instance) sshArgs(keyFile, certFile string) []string {
+	args := []string{}
+	if i.Logger != nil && i.Logger.level <= LevelDebug {
+		args = append(args, "-v")
+	}
+	args = append(args,
+		"-o", "ServerAliveInterval=15",
+		"-o", "IdentitiesOnly=yes",
+		"-i", keyFile,
+	)
+	if strings.TrimSpace(certFile) != "" {
+		args = append(args, "-o", "CertificateFile="+certFile)
+	}
+	args = append(args, i.SSHOptions()...)
+	args = append(args, i.SSHAddress())
+	return args
+}
+
 func (i *Instance) SSH(command string, input io.Reader) error {
 	keyFile, certFile, err := i.writeTempKeys()
 	if err != nil {
@@ -329,25 +410,33 @@ func (i *Instance) SSH(command string, input io.Reader) error {
 		}
 	}()
 
-	args := []string{}
-	if i.Logger != nil && i.Logger.level <= LevelDebug {
-		args = append(args, "-v")
-	}
-	args = append(args,
-		"-o", "ServerAliveInterval=15",
-		"-o", "IdentitiesOnly=yes",
-		"-i", keyFile,
-	)
-	args = append(args, i.SSHOptions()...)
-	args = append(args, i.SSHAddress())
+	args := i.sshArgs(keyFile, certFile)
 	args = append(args, command)
 
 	cmd := exec.CommandContext(i.Context, "ssh", args...)
 	cmd.Stdin = input
-	if input == nil {
-		cmd.Stdin = os.Stdin
-	}
 	return i.Runner.Run(cmd)
+}
+
+func (i *Instance) SSHOutput(command string, input io.Reader) (string, error) {
+	keyFile, certFile, err := i.writeTempKeys()
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = os.Remove(keyFile)
+		if certFile != "" {
+			_ = os.Remove(certFile)
+		}
+	}()
+
+	args := i.sshArgs(keyFile, certFile)
+	args = append(args, command)
+
+	cmd := exec.CommandContext(i.Context, "ssh", args...)
+	cmd.Stdin = input
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 func (i *Instance) SSHAddress() string {
@@ -360,6 +449,8 @@ func (i *Instance) SSHAddress() string {
 
 func (i *Instance) SSHOptions() []string {
 	return []string{
+		"-o", "BatchMode=yes",
+		"-o", "IdentityAgent=none",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
@@ -401,7 +492,14 @@ func (i *Instance) EnsureRemoteAuthorizedKeysOwner() error {
 }
 
 func (i *Instance) DeployApp(appPath string) error {
-	return i.DeployWithDockerContext(appPath)
+	switch i.DeploymentTarget {
+	case DeploymentTargetHelm:
+		return i.DeployWithHelm(appPath)
+	case DeploymentTargetCompose:
+		return i.DeployWithDockerContext(appPath)
+	default:
+		return fmt.Errorf("unsupported deployment target %q", i.DeploymentTarget)
+	}
 }
 
 func (i *Instance) SetupScripts() error {

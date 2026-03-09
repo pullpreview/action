@@ -15,6 +15,9 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 	if opts.Subdomain != "" {
 		instance.WithSubdomain(opts.Subdomain)
 	}
+	if err := instance.ValidateDeploymentConfig(); err != nil {
+		return nil, err
+	}
 
 	appPath := opts.AppPath
 	clonePath, cloneCleanup, err := instance.CloneIfURL(appPath)
@@ -71,7 +74,11 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 	fmt.Printf("  %s\n\n", instance.URL())
 	fmt.Println(instructions)
 	fmt.Println("Then to view the logs:")
-	fmt.Println("  docker-compose logs --tail 1000 -f")
+	if instance.DeploymentTarget == DeploymentTargetHelm {
+		fmt.Printf("  ssh %s sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl logs -n %s deploy/pullpreview-caddy -f\n", instance.SSHAddress(), instance.HelmNamespace())
+	} else {
+		fmt.Println("  docker-compose logs --tail 1000 -f")
+	}
 	fmt.Println()
 
 	return instance, nil

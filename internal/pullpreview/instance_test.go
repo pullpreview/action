@@ -82,6 +82,32 @@ func TestProxyTLSForcesHTTPSDefaults(t *testing.T) {
 	}
 }
 
+func TestProxyTLSKeepsPort80ForHelm(t *testing.T) {
+	inst := NewInstance("my-app", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		DNS:              "my.preview.run",
+		DefaultPort:      "8080",
+		Ports:            []string{"80/tcp", "443/tcp"},
+		ProxyTLS:         "app-wordpress:80",
+	}, fakeProvider{}, nil)
+
+	ports := inst.PortsWithDefaults()
+	expected := map[string]bool{
+		"80/tcp":  true,
+		"443/tcp": true,
+		"443":     true,
+		"22":      true,
+	}
+	if len(ports) != len(expected) {
+		t.Fatalf("unexpected ports list: %#v", ports)
+	}
+	for _, port := range ports {
+		if !expected[port] {
+			t.Fatalf("unexpected port %q in %#v", port, ports)
+		}
+	}
+}
+
 func TestFirewallRuleTargetsPort(t *testing.T) {
 	cases := []struct {
 		rule   string
@@ -164,6 +190,9 @@ func TestSSHBuildsCommandWithExpectedArguments(t *testing.T) {
 	args := strings.Join(runner.args[0], " ")
 	if !strings.Contains(args, "ec2-user@1.2.3.4") || !strings.Contains(args, "echo ok") {
 		t.Fatalf("unexpected ssh command args: %s", args)
+	}
+	if !strings.Contains(args, "BatchMode=yes") || !strings.Contains(args, "IdentityAgent=none") {
+		t.Fatalf("expected non-interactive ssh options, got: %s", args)
 	}
 }
 

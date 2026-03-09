@@ -67,6 +67,9 @@ func (i *Instance) writeRemoteEnvFile() (map[string]string, error) {
 		fmt.Sprintf("PULLPREVIEW_PUBLIC_IP=%s", envValues["PULLPREVIEW_PUBLIC_IP"]),
 		fmt.Sprintf("PULLPREVIEW_URL=%s", envValues["PULLPREVIEW_URL"]),
 		fmt.Sprintf("PULLPREVIEW_FIRST_RUN=%s", envValues["PULLPREVIEW_FIRST_RUN"]),
+		fmt.Sprintf("PULLPREVIEW_DEPLOYMENT_TARGET=%s", envValues["PULLPREVIEW_DEPLOYMENT_TARGET"]),
+		fmt.Sprintf("PULLPREVIEW_NAMESPACE=%s", envValues["PULLPREVIEW_NAMESPACE"]),
+		fmt.Sprintf("PULLPREVIEW_RELEASE_NAME=%s", envValues["PULLPREVIEW_RELEASE_NAME"]),
 		fmt.Sprintf("COMPOSE_FILE=%s", envValues["COMPOSE_FILE"]),
 		"",
 	}, "\n")
@@ -74,10 +77,10 @@ func (i *Instance) writeRemoteEnvFile() (map[string]string, error) {
 		return nil, err
 	}
 	user := i.Username()
-		command := fmt.Sprintf(
-			"sudo mkdir -p /etc/pullpreview && sudo mv /tmp/pullpreview_env %s && sudo chown %s:%s %s && sudo chmod 0644 %s",
-			remoteEnvPath, user, user, remoteEnvPath, remoteEnvPath,
-		)
+	command := fmt.Sprintf(
+		"sudo mkdir -p /etc/pullpreview && sudo mv /tmp/pullpreview_env %s && sudo chown %s:%s %s && sudo chmod 0644 %s",
+		remoteEnvPath, user, user, remoteEnvPath, remoteEnvPath,
+	)
 	if err := i.SSH(command, nil); err != nil {
 		return nil, err
 	}
@@ -137,12 +140,19 @@ func (i *Instance) composeConfigForRemoteContext(appPath string, pullpreviewEnv 
 }
 
 func (i *Instance) pullpreviewEnvValues(firstRun string) map[string]string {
+	composeFile := ""
+	if i.DeploymentTarget == DeploymentTargetCompose {
+		composeFile = strings.Join(i.ComposeFiles, ":")
+	}
 	return map[string]string{
-		"PULLPREVIEW_PUBLIC_DNS": i.PublicDNS(),
-		"PULLPREVIEW_PUBLIC_IP":  i.PublicIP(),
-		"PULLPREVIEW_URL":        i.URL(),
-		"PULLPREVIEW_FIRST_RUN":  firstRun,
-		"COMPOSE_FILE":           strings.Join(i.ComposeFiles, ":"),
+		"PULLPREVIEW_PUBLIC_DNS":        i.PublicDNS(),
+		"PULLPREVIEW_PUBLIC_IP":         i.PublicIP(),
+		"PULLPREVIEW_URL":               i.URL(),
+		"PULLPREVIEW_FIRST_RUN":         firstRun,
+		"PULLPREVIEW_DEPLOYMENT_TARGET": string(i.DeploymentTarget),
+		"PULLPREVIEW_NAMESPACE":         i.HelmNamespace(),
+		"PULLPREVIEW_RELEASE_NAME":      helmReleaseName,
+		"COMPOSE_FILE":                  composeFile,
 	}
 }
 
@@ -289,13 +299,13 @@ func (i *Instance) ensureRemoteBindMountTargets(syncPlan []bindMountSync) error 
 	for _, dir := range ordered {
 		quoted = append(quoted, shellQuote(dir))
 	}
-		command := fmt.Sprintf(
-			"sudo mkdir -p %s && sudo chown %s:%s %s",
-			strings.Join(quoted, " "),
-			user,
-			user,
-			strings.Join(quoted, " "),
-		)
+	command := fmt.Sprintf(
+		"sudo mkdir -p %s && sudo chown %s:%s %s",
+		strings.Join(quoted, " "),
+		user,
+		user,
+		strings.Join(quoted, " "),
+	)
 	return i.SSH(command, nil)
 }
 

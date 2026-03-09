@@ -13,8 +13,8 @@ is made to Pull Requests labelled with the `pullpreview` label.
 When triggered, it will:
 
 1. Check out the repository code
-2. Provision a preview instance (Lightsail by default, or Hetzner with `provider: hetzner`), with docker and docker-compose set up
-3. Continuously deploy the specified pull requests using your docker-compose file(s)
+2. Provision a preview instance (Lightsail by default, or Hetzner with `provider: hetzner`), with the runtime needed for the selected deployment target
+3. Continuously deploy the specified pull requests using your Docker Compose file(s) or a Helm chart on k3s
 4. Report the preview instance URL in the GitHub UI
 
 It is designed to be the **no-nonsense, cheap, and secure** alternative to
@@ -57,7 +57,8 @@ When the label is removed, the preview environment is automatically destroyed.
 Preview environments that:
 
 - work with your **existing tooling**: If your app can be started with
-  docker-compose, it can be deployed to preview environments with PullPreview.
+  docker-compose or packaged as a Helm chart, it can be deployed to preview
+  environments with PullPreview.
 
 - can be **started and destroyed easily**: You can manage preview environments
   by adding or removing the `pullpreview` label on your Pull Requests.
@@ -115,8 +116,13 @@ All supported `with:` inputs from `action.yml`:
 | `ports` | `80/tcp,443/tcp` | Firewall ports to expose publicly (SSH `22` is always open). |
 | `cidrs` | `0.0.0.0/0` | Allowed source CIDR ranges for exposed ports. |
 | `default_port` | `80` | Port used to build the preview URL output. |
+| `deployment_target` | `compose` | Deployment target: `compose` or `helm` (`helm` is Hetzner-only in this first pass). |
 | `compose_files` | `docker-compose.yml` | Comma-separated Compose files passed to deploy. |
 | `compose_options` | `--build` | Additional options appended to `docker compose up`. |
+| `chart` | `""` | Helm chart path, name, or OCI reference (`deployment_target: helm`). |
+| `chart_repository` | `""` | Helm repository URL for `chart` (`deployment_target: helm`). |
+| `chart_values` | `""` | Comma-separated Helm values files relative to `app_path` (`deployment_target: helm`). |
+| `chart_set` | `""` | Comma-separated Helm `--set` overrides (`deployment_target: helm`). |
 | `license` | `""` | PullPreview license key. |
 | `instance_type` | `small` | Provider-specific instance size (`small` for Lightsail, `cpx21` for Hetzner). |
 | `region` | `` | Optional provider region/datacenter override (`AWS_REGION`/Hetzner location). If empty, provider defaults apply. |
@@ -131,6 +137,7 @@ All supported `with:` inputs from `action.yml`:
 Notes:
 
 - `proxy_tls` forces URL/output/comment links to HTTPS on port `443`, injects a Caddy proxy service, and suppresses firewall exposure for port `80`. **When using `proxy_tls`, it is strongly recommended to set `dns` to a [custom domain](https://github.com/pullpreview/action/wiki/Using-a-custom-domain) or one of the built-in `revN.click` alternatives** to avoid hitting shared Let's Encrypt rate limits on `my.preview.run`.
+- For `deployment_target: helm`, `proxy_tls` is required and targets the Kubernetes Service behind the PullPreview-managed Caddy gateway (`service:port`, with placeholder support such as `{{ release_name }}` and `{{ namespace }}`).
 - `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
 - SSH key fetches are cached between runs in the action cache.
 - For Hetzner, configure credentials and defaults via action inputs and environment: `HCLOUD_TOKEN` (required), `HETZNER_CA_KEY` (required), optional `region` and `image` (`region` defaults to `nbg1`, `image` defaults to `ubuntu-24.04`). `instance_type` defaults to `cpx21` when provider is Hetzner.
@@ -223,6 +230,38 @@ jobs:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
           HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"
 
+```
+
+## Hetzner Helm example
+
+```yaml
+# .github/workflows/pullpreview-hetzner-helm.yml
+name: PullPreview Helm
+on:
+  pull_request:
+    types: [labeled, unlabeled, synchronize, closed, reopened, opened]
+
+jobs:
+  deploy_hetzner_helm:
+    runs-on: ubuntu-slim
+    if: github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pullpreview/action@v6
+        with:
+          provider: hetzner
+          deployment_target: helm
+          chart: wordpress
+          chart_repository: https://charts.bitnami.com/bitnami
+          proxy_tls: "{{ release_name }}-wordpress:80"
+          instance_type: cpx21
+          image: ubuntu-24.04
+          region: nbg1
+          dns: rev2.click
+        env:
+          HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
+          HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"
 ```
 
 ## CLI usage (installed binary)

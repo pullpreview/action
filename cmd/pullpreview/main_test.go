@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"flag"
+	"testing"
+
+	"github.com/pullpreview/action/internal/pullpreview"
+)
 
 func TestDefaultUpNameFromLocalPath(t *testing.T) {
 	got := defaultUpName("path/to/example-app")
@@ -49,5 +55,75 @@ func TestSplitLeadingPositionalWhenFlagsFirst(t *testing.T) {
 	}
 	if len(rest) != 3 {
 		t.Fatalf("unexpected remaining args: %#v", rest)
+	}
+}
+
+func TestRegisterCommonFlagsParsesHelmOptions(t *testing.T) {
+	fs := flag.NewFlagSet("up", flag.ContinueOnError)
+	values := registerCommonFlags(fs)
+	if err := fs.Parse([]string{
+		"--provider", "hetzner",
+		"--deployment-target", "helm",
+		"--chart", "wordpress",
+		"--chart-repository", "https://charts.bitnami.com/bitnami",
+		"--chart-values", "values.yaml,values.preview.yaml",
+		"--chart-set", "image.tag=123,ingress.host={{ release_name }}.preview.run",
+	}); err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+
+	opts := values.ToOptions(context.Background())
+	if opts.ProviderName != "hetzner" {
+		t.Fatalf("expected provider name hetzner, got %q", opts.ProviderName)
+	}
+	if opts.DeploymentTarget != pullpreview.DeploymentTargetHelm {
+		t.Fatalf("expected helm deployment target, got %q", opts.DeploymentTarget)
+	}
+	if opts.Chart != "wordpress" {
+		t.Fatalf("unexpected chart: %q", opts.Chart)
+	}
+	if opts.ChartRepository != "https://charts.bitnami.com/bitnami" {
+		t.Fatalf("unexpected chart repository: %q", opts.ChartRepository)
+	}
+	if len(opts.ChartValues) != 2 || opts.ChartValues[0] != "values.yaml" || opts.ChartValues[1] != "values.preview.yaml" {
+		t.Fatalf("unexpected chart values: %#v", opts.ChartValues)
+	}
+	if len(opts.ChartSet) != 2 {
+		t.Fatalf("unexpected chart set values: %#v", opts.ChartSet)
+	}
+}
+
+func TestRegisterCommonFlagsDefaultsToCompose(t *testing.T) {
+	fs := flag.NewFlagSet("up", flag.ContinueOnError)
+	values := registerCommonFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+
+	opts := values.ToOptions(context.Background())
+	if opts.DeploymentTarget != pullpreview.DeploymentTargetCompose {
+		t.Fatalf("expected compose deployment target by default, got %q", opts.DeploymentTarget)
+	}
+	if len(opts.ComposeFiles) != 1 || opts.ComposeFiles[0] != "docker-compose.yml" {
+		t.Fatalf("unexpected compose files: %#v", opts.ComposeFiles)
+	}
+	if len(opts.ComposeOptions) != 1 || opts.ComposeOptions[0] != "--build" {
+		t.Fatalf("unexpected compose options: %#v", opts.ComposeOptions)
+	}
+	if len(opts.ChartValues) != 0 || len(opts.ChartSet) != 0 {
+		t.Fatalf("expected empty helm options by default, got values=%#v set=%#v", opts.ChartValues, opts.ChartSet)
+	}
+}
+
+func TestRegisterCommonFlagsNormalizesDeploymentTarget(t *testing.T) {
+	fs := flag.NewFlagSet("up", flag.ContinueOnError)
+	values := registerCommonFlags(fs)
+	if err := fs.Parse([]string{"--deployment-target", "HeLm"}); err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+
+	opts := values.ToOptions(context.Background())
+	if opts.DeploymentTarget != pullpreview.DeploymentTargetHelm {
+		t.Fatalf("expected normalized helm target, got %q", opts.DeploymentTarget)
 	}
 }
