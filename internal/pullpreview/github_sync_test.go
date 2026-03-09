@@ -669,6 +669,37 @@ func TestClearDanglingDeploymentsWithoutVariantSkipsVariantInstances(t *testing.
 	}
 }
 
+func TestClearDanglingDeploymentsSkipsInstancesFromDifferentLabel(t *testing.T) {
+	client := &fakeGitHub{}
+	provider := &scheduledCleanupProvider{
+		instances: []InstanceSummary{
+			{Name: "gh-1-pr-10", Tags: map[string]string{"pr_number": "10", "pullpreview_label": "pullpreview"}},
+			{Name: "gh-1-pr-11", Tags: map[string]string{"pr_number": "11", "pullpreview_label": "pullpreview-helm"}},
+			{Name: "gh-1-pr-12", Tags: map[string]string{"pr_number": "12"}}, // legacy instance without label tag
+		},
+	}
+	destroyed := []string{}
+	originalRunDown := runDownFunc
+	defer func() { runDownFunc = originalRunDown }()
+	runDownFunc = func(opts DownOptions, provider Provider, logger *Logger) error {
+		destroyed = append(destroyed, opts.Name)
+		return nil
+	}
+
+	err := clearDanglingDeployments("org/repo", GithubSyncOptions{
+		Label: "pullpreview",
+	}, provider, client, nil)
+	if err != nil {
+		t.Fatalf("clearDanglingDeployments() error: %v", err)
+	}
+
+	sort.Strings(destroyed)
+	wantDestroyed := []string{"gh-1-pr-10", "gh-1-pr-12"}
+	if strings.Join(destroyed, ",") != strings.Join(wantDestroyed, ",") {
+		t.Fatalf("unexpected destroyed instances for label-scoped cleanup: got=%v want=%v", destroyed, wantDestroyed)
+	}
+}
+
 func TestParsePullPreviewInstanceName(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -800,6 +831,42 @@ func TestInstanceMatchesCleanupVariantPrecedence(t *testing.T) {
 		Tags: map[string]string{},
 	}, "") {
 		t.Fatalf("expected parsed non-pr branch instance without variant to match empty filter")
+	}
+}
+
+func TestInstanceMatchesCleanupLabel(t *testing.T) {
+	if !instanceMatchesCleanupLabel(InstanceSummary{
+		Name: "gh-1-pr-10",
+		Tags: map[string]string{"pullpreview_label": "pullpreview-helm"},
+	}, "PullPreview Helm") {
+		t.Fatalf("expected canonical label match")
+	}
+
+	if instanceMatchesCleanupLabel(InstanceSummary{
+		Name: "gh-1-pr-10",
+		Tags: map[string]string{"pullpreview_label": "pullpreview"},
+	}, "pullpreview-helm") {
+		t.Fatalf("expected mismatched label tag to be skipped")
+	}
+
+	if !instanceMatchesCleanupLabel(InstanceSummary{
+		Name: "gh-1-pr-10",
+		Tags: map[string]string{},
+	}, "pullpreview-helm") {
+		t.Fatalf("expected legacy instance without label tag to remain eligible")
+	}
+}
+
+func TestDefaultInstanceTagsIncludeCanonicalLabel(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	sync := newSync(event, GithubSyncOptions{
+		Label:  "PullPreview Helm",
+		Common: CommonOptions{},
+	}, &fakeGitHub{}, fakeProvider{running: true})
+
+	tags := sync.defaultInstanceTags()
+	if tags["pullpreview_label"] != "pullpreview-helm" {
+		t.Fatalf("unexpected canonical label tag: %#v", tags)
 	}
 }
 
