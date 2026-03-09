@@ -199,6 +199,9 @@ func clearDanglingDeployments(repo string, opts GithubSyncOptions, provider Prov
 	activeInstanceNames := []string{}
 	removedInstanceNames := []string{}
 	for _, inst := range instances {
+		if !instanceMatchesCleanupLabel(inst, opts.Label) {
+			continue
+		}
 		if !instanceMatchesCleanupVariant(inst, opts.DeploymentVariant) {
 			continue
 		}
@@ -324,6 +327,22 @@ func instanceMatchesCleanupVariant(inst InstanceSummary, expectedVariant string)
 	}
 	parsed, ok := parsePullPreviewInstanceName(inst.Name)
 	return ok && strings.EqualFold(parsed.Variant, expectedVariant)
+}
+
+func canonicalCleanupLabel(label string) string {
+	return strings.ToLower(NormalizeName(strings.TrimSpace(label)))
+}
+
+func instanceMatchesCleanupLabel(inst InstanceSummary, expectedLabel string) bool {
+	expected := canonicalCleanupLabel(expectedLabel)
+	if expected == "" {
+		return true
+	}
+	actual := canonicalCleanupLabel(firstTagValue(inst.Tags, "pullpreview_label"))
+	if actual == "" {
+		return true
+	}
+	return actual == expected
 }
 
 type parsedInstanceName struct {
@@ -1077,13 +1096,14 @@ func (g *GithubSync) instanceSubdomain() string {
 
 func (g *GithubSync) defaultInstanceTags() map[string]string {
 	tags := map[string]string{
-		"repo_name":        g.repoName(),
-		"repo_id":          fmt.Sprintf("%d", g.repoID()),
-		"org_name":         g.orgName(),
-		"org_id":           fmt.Sprintf("%d", g.orgID()),
-		"version":          Version,
-		"pullpreview_repo": g.repo(),
-		"pullpreview_kind": "branch",
+		"repo_name":         g.repoName(),
+		"repo_id":           fmt.Sprintf("%d", g.repoID()),
+		"org_name":          g.orgName(),
+		"org_id":            fmt.Sprintf("%d", g.orgID()),
+		"version":           Version,
+		"pullpreview_repo":  g.repo(),
+		"pullpreview_kind":  "branch",
+		"pullpreview_label": canonicalCleanupLabel(g.opts.Label),
 	}
 	if branch := g.branch(); branch != "" {
 		tags["pullpreview_branch"] = branch
