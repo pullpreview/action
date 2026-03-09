@@ -1,0 +1,380 @@
+package pullpreview
+
+import (
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func (f fakeProvider) Name() string {
+	return "hetzner"
+}
+
+func (f fakeProvider) DisplayName() string {
+	return "Hetzner Cloud"
+}
+
+type fakeLightsailProvider struct{}
+
+func (f fakeLightsailProvider) Launch(name string, opts LaunchOptions) (AccessDetails, error) {
+	return AccessDetails{}, nil
+}
+
+func (f fakeLightsailProvider) Terminate(name string) error { return nil }
+
+func (f fakeLightsailProvider) Running(name string) (bool, error) { return false, nil }
+
+func (f fakeLightsailProvider) ListInstances(tags map[string]string) ([]InstanceSummary, error) {
+	return nil, nil
+}
+
+func (f fakeLightsailProvider) Username() string { return "ec2-user" }
+
+func (f fakeLightsailProvider) Name() string {
+	return "lightsail"
+}
+
+func (f fakeLightsailProvider) DisplayName() string {
+	return "AWS Lightsail"
+}
+
+type scriptCaptureRunner struct {
+	args   [][]string
+	inputs []string
+}
+
+func (r *scriptCaptureRunner) Run(cmd *exec.Cmd) error {
+	r.args = append(r.args, append([]string{}, cmd.Args...))
+	if cmd.Stdin != nil {
+		body, err := io.ReadAll(cmd.Stdin)
+		if err != nil {
+			return err
+		}
+		r.inputs = append(r.inputs, string(body))
+	} else {
+		r.inputs = append(r.inputs, "")
+	}
+	return nil
+}
+
+func TestValidateDeploymentConfigForHelm(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ProxyTLS:         "{{ release_name }}-wordpress:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	if err := inst.ValidateDeploymentConfig(); err != nil {
+		t.Fatalf("ValidateDeploymentConfig() error: %v", err)
+	}
+}
+
+func TestValidateDeploymentConfigRejectsHelmWithoutProxyTLS(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+	}, fakeProvider{}, nil)
+
+	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "proxy_tls") {
+		t.Fatalf("expected proxy_tls validation error, got %v", err)
+	}
+}
+
+func TestValidateDeploymentConfigRejectsComposeWithHelmOptions(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetCompose,
+		Chart:            "wordpress",
+	}, fakeProvider{}, nil)
+
+	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "require deployment_target=helm") {
+		t.Fatalf("expected compose/helm validation error, got %v", err)
+	}
+}
+
+func TestValidateDeploymentConfigRejectsHelmForNonHetznerProvider(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ProxyTLS:         "app-wordpress:80",
+	}, fakeLightsailProvider{}, nil)
+
+	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "provider=hetzner") {
+		t.Fatalf("expected provider validation error, got %v", err)
+	}
+}
+
+func TestValidateDeploymentConfigRejectsHelmSpecificComposeOverrides(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ProxyTLS:         "app-wordpress:80",
+		ComposeFiles:     []string{"docker-compose.preview.yml"},
+	}, fakeProvider{}, nil)
+
+	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "compose_files") {
+		t.Fatalf("expected compose_files validation error, got %v", err)
+	}
+
+	inst = NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ProxyTLS:         "app-wordpress:80",
+		ComposeOptions:   []string{"--no-build"},
+	}, fakeProvider{}, nil)
+
+	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "compose_options") {
+		t.Fatalf("expected compose_options validation error, got %v", err)
+	}
+}
+
+func TestExpandDeploymentValue(t *testing.T) {
+	inst := NewInstance("Demo App", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ProxyTLS:         "{{ release_name }}-wordpress:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	got := inst.expandDeploymentValue("https://{{ pullpreview_public_dns }}/{{ namespace }}/{{ release_name }}")
+	if got != "https://Demo-App-ip-1-2-3-4.rev2.click/pp-demo-app/app" {
+		t.Fatalf("unexpected expanded value: %q", got)
+	}
+}
+
+func TestResolveHelmChartSourceForLocalChart(t *testing.T) {
+	appPath := t.TempDir()
+	chartPath := filepath.Join(appPath, "charts", "demo")
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: demo\nversion: 0.1.0\n"), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	source, err := inst.resolveHelmChartSource(appPath)
+	if err != nil {
+		t.Fatalf("resolveHelmChartSource() error: %v", err)
+	}
+	if source.ChartRef != "/app/charts/demo" {
+		t.Fatalf("unexpected chart ref: %q", source.ChartRef)
+	}
+	if !source.RequiresSync {
+		t.Fatalf("expected local chart to require sync")
+	}
+}
+
+func TestResolveHelmChartSourceForRepositoryChart(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ProxyTLS:         "app-wordpress:80",
+	}, fakeProvider{}, nil)
+
+	source, err := inst.resolveHelmChartSource(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveHelmChartSource() error: %v", err)
+	}
+	if source.ChartRef != "pullpreview/wordpress" {
+		t.Fatalf("unexpected chart ref: %q", source.ChartRef)
+	}
+	if source.RepoURL != "https://charts.bitnami.com/bitnami" {
+		t.Fatalf("unexpected repo url: %q", source.RepoURL)
+	}
+	if source.RequiresSync {
+		t.Fatalf("expected repo chart to avoid sync")
+	}
+}
+
+func TestResolveHelmChartSourceForOCIChart(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "oci://registry-1.docker.io/bitnamicharts/wordpress",
+		ProxyTLS:         "app-wordpress:80",
+	}, fakeProvider{}, nil)
+
+	source, err := inst.resolveHelmChartSource(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveHelmChartSource() error: %v", err)
+	}
+	if source.ChartRef != "oci://registry-1.docker.io/bitnamicharts/wordpress" {
+		t.Fatalf("unexpected chart ref: %q", source.ChartRef)
+	}
+	if source.RepoURL != "" || source.RequiresSync {
+		t.Fatalf("unexpected OCI chart source: %#v", source)
+	}
+}
+
+func TestHelmValueArgsExpandsPlaceholdersAndSyncsValuesFiles(t *testing.T) {
+	appPath := t.TempDir()
+	for _, path := range []string{
+		filepath.Join(appPath, "values.yaml"),
+		filepath.Join(appPath, "overrides", "preview.yaml"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("mkdir values dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("key: value\n"), 0644); err != nil {
+			t.Fatalf("write values file: %v", err)
+		}
+	}
+
+	inst := NewInstance("Demo App", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ChartValues:      []string{"values.yaml", "overrides/preview.yaml"},
+		ChartSet: []string{
+			"service.type=ClusterIP",
+			"ingress.hostname={{ pullpreview_public_dns }}",
+			"url={{ pullpreview_url }}",
+		},
+		ProxyTLS: "{{ release_name }}-wordpress:80",
+		DNS:      "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	args, requiresSync, err := inst.helmValueArgs(appPath)
+	if err != nil {
+		t.Fatalf("helmValueArgs() error: %v", err)
+	}
+	want := []string{
+		"--values", "/app/values.yaml",
+		"--values", "/app/overrides/preview.yaml",
+		"--set", "service.type=ClusterIP",
+		"--set", "ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click",
+		"--set", "url=https://Demo-App-ip-1-2-3-4.rev2.click:443",
+	}
+	if len(args) != len(want) {
+		t.Fatalf("unexpected helm args length: got=%#v want=%#v", args, want)
+	}
+	for idx := range want {
+		if args[idx] != want[idx] {
+			t.Fatalf("unexpected helm arg %d: got=%q want=%q all=%#v", idx, args[idx], want[idx], args)
+		}
+	}
+	if !requiresSync {
+		t.Fatalf("expected local values files to require sync")
+	}
+}
+
+func TestRunHelmDeploymentBuildsExpectedScriptForRepoChart(t *testing.T) {
+	inst := NewInstance("Demo App", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ProxyTLS:         "{{ release_name }}-wordpress:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE", CertKey: "CERT"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	err := inst.runHelmDeployment(helmChartSource{
+		ChartRef: "pullpreview/wordpress",
+		RepoURL:  "https://charts.bitnami.com/bitnami",
+	}, []string{
+		"--values", "/app/values.yaml",
+		"--set", "service.type=ClusterIP",
+		"--set", "ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click",
+	})
+	if err != nil {
+		t.Fatalf("runHelmDeployment() error: %v", err)
+	}
+	if len(runner.args) != 1 || len(runner.inputs) != 1 {
+		t.Fatalf("expected one ssh invocation, got args=%d inputs=%d", len(runner.args), len(runner.inputs))
+	}
+
+	sshArgs := strings.Join(runner.args[0], " ")
+	if !strings.Contains(sshArgs, "CertificateFile=") || !strings.Contains(sshArgs, "root@1.2.3.4") || !strings.Contains(sshArgs, "bash -se") {
+		t.Fatalf("unexpected ssh args: %s", sshArgs)
+	}
+
+	script := runner.inputs[0]
+	checks := []string{
+		"source /etc/pullpreview/env",
+		"export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",
+		"kubectl create namespace 'pp-demo-app' --dry-run=client -o yaml | kubectl apply -f - >/dev/null",
+		"helm repo add pullpreview 'https://charts.bitnami.com/bitnami' --force-update >/dev/null",
+		"helm repo update pullpreview >/dev/null",
+		"'helm' 'upgrade' '--install' 'app' 'pullpreview/wordpress' '--namespace' 'pp-demo-app' '--create-namespace' '--wait' '--atomic' '--values' '/app/values.yaml' '--set' 'service.type=ClusterIP' '--set' 'ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click'",
+		"cat <<'EOF' >/tmp/pullpreview-caddy.yaml",
+		"Demo-App-ip-1-2-3-4.rev2.click {",
+		"reverse_proxy app-wordpress.pp-demo-app.svc.cluster.local:80",
+		"kubectl rollout status deployment/pullpreview-caddy -n 'pp-demo-app' --timeout=10m",
+	}
+	for _, check := range checks {
+		if !strings.Contains(script, check) {
+			t.Fatalf("expected script to contain %q, script:\n%s", check, script)
+		}
+	}
+}
+
+func TestRunHelmDeploymentBuildsDependencyStepForLocalChart(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ProxyTLS:         "app-wordpress:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	err := inst.runHelmDeployment(helmChartSource{
+		ChartRef:   "/app/charts/demo",
+		LocalChart: "/tmp/demo",
+	}, nil)
+	if err != nil {
+		t.Fatalf("runHelmDeployment() error: %v", err)
+	}
+	if len(runner.inputs) != 1 {
+		t.Fatalf("expected one ssh script, got %d", len(runner.inputs))
+	}
+	script := runner.inputs[0]
+	if !strings.Contains(script, "helm dependency build '/app/charts/demo' >/dev/null") {
+		t.Fatalf("expected helm dependency build for local chart, script:\n%s", script)
+	}
+	if strings.Contains(script, "helm repo add pullpreview") {
+		t.Fatalf("did not expect repo add for local chart, script:\n%s", script)
+	}
+}
+
+func TestRenderHelmCaddyManifest(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ProxyTLS:         "app-wordpress:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	manifest := inst.renderHelmCaddyManifest(inst.HelmNamespace(), "app-wordpress.pp-demo.svc.cluster.local", 80)
+	if !strings.Contains(manifest, "name: pullpreview-caddy") {
+		t.Fatalf("expected caddy deployment in manifest: %s", manifest)
+	}
+	if !strings.Contains(manifest, "command:\n            - caddy") {
+		t.Fatalf("expected caddy command in manifest: %s", manifest)
+	}
+	if !strings.Contains(manifest, "demo-ip-1-2-3-4.rev2.click") {
+		t.Fatalf("expected public DNS in manifest: %s", manifest)
+	}
+	if !strings.Contains(manifest, "reverse_proxy app-wordpress.pp-demo.svc.cluster.local:80") {
+		t.Fatalf("expected reverse proxy upstream in manifest: %s", manifest)
+	}
+}

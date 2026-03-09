@@ -1,5 +1,5 @@
 name: "Preview Environments for GitHub"
-description: "Ephemeral preview deployments of your app for every pull request. Just using Docker Compose."
+description: "Ephemeral preview deployments of your app for every pull request."
 author: "Cyril Rohr"
 branding:
   icon: anchor
@@ -45,6 +45,26 @@ inputs:
     description: "Additional options to pass to docker-compose up, comma-separated"
     required: false
     default: "--build"
+  deployment_target:
+    description: "Deployment target to use: compose or helm"
+    required: false
+    default: "compose"
+  chart:
+    description: "Helm chart path, name, or OCI reference (helm target only)"
+    required: false
+    default: ""
+  chart_repository:
+    description: "Helm repository URL to use with chart (helm target only)"
+    required: false
+    default: ""
+  chart_values:
+    description: "Helm values files relative to app_path, comma-separated (helm target only)"
+    required: false
+    default: ""
+  chart_set:
+    description: "Additional Helm --set overrides, comma-separated (helm target only)"
+    required: false
+    default: ""
   license:
     description: "PullPreview license"
     required: false
@@ -155,8 +175,13 @@ runs:
         "${binary}" github-sync "${app_path}" \
           --admins "${{ inputs.admins }}" \
           --cidrs "${{ inputs.cidrs }}" \
+          --deployment-target "${{ inputs.deployment_target }}" \
           --compose-files "${{ inputs.compose_files }}" \
           --compose-options "${{ inputs.compose_options }}" \
+          --chart "${{ inputs.chart }}" \
+          --chart-repository "${{ inputs.chart_repository }}" \
+          --chart-values "${{ inputs.chart_values }}" \
+          --chart-set "${{ inputs.chart_set }}" \
           --dns "${{ inputs.dns }}" \
           --label "${{ inputs.label }}" \
           --ports "${{ inputs.ports }}" \

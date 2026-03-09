@@ -148,6 +148,24 @@ func TestBuildUserDataBranchesAndPaths(t *testing.T) {
 	if strings.Contains(debianScript, "authorized_keys") {
 		t.Fatalf("did not expect authorized_keys setup without keys: %s", debianScript)
 	}
+
+	helmScript, err := p.BuildUserData(pullpreview.UserDataOptions{
+		AppPath:          "/app",
+		Username:         "root",
+		DeploymentTarget: pullpreview.DeploymentTargetHelm,
+	})
+	if err != nil {
+		t.Fatalf("BuildUserData() for helm error: %v", err)
+	}
+	if !strings.Contains(helmScript, "INSTALL_K3S_EXEC='server --disable traefik'") {
+		t.Fatalf("expected k3s install command in helm script: %s", helmScript)
+	}
+	if !strings.Contains(helmScript, "get-helm-3") {
+		t.Fatalf("expected helm installer in helm script: %s", helmScript)
+	}
+	if strings.Contains(helmScript, "docker-compose-plugin") {
+		t.Fatalf("did not expect docker compose install in helm script: %s", helmScript)
+	}
 }
 
 func TestValidateSSHPrivateKeyFormat(t *testing.T) {
@@ -497,9 +515,13 @@ func TestHetznerLaunchLifecycleRecreateWhenCacheMissing(t *testing.T) {
 	provider.client = client
 	originalRunSSHCommand := runSSHCommand
 	defer func() { runSSHCommand = originalRunSSHCommand }()
+	certChecks := 0
 	runSSHCommand = func(_ context.Context, _ string, certFile string, _ string, _ string) ([]byte, error) {
 		if strings.TrimSpace(certFile) != "" {
-			return nil, fmt.Errorf("ssh unavailable")
+			certChecks++
+			if certChecks <= defaultHetznerSSHRetries {
+				return nil, fmt.Errorf("ssh unavailable")
+			}
 		}
 		return []byte("ok"), nil
 	}

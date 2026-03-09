@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+type DeploymentTarget string
+
+const (
+	DeploymentTargetCompose DeploymentTarget = "compose"
+	DeploymentTargetHelm    DeploymentTarget = "helm"
+)
+
 type Provider interface {
 	Launch(name string, opts LaunchOptions) (AccessDetails, error)
 	Terminate(name string) error
@@ -42,9 +49,10 @@ type AccessDetails struct {
 }
 
 type UserDataOptions struct {
-	AppPath       string
-	SSHPublicKeys []string
-	Username      string
+	AppPath          string
+	DeploymentTarget DeploymentTarget
+	SSHPublicKeys    []string
+	Username         string
 }
 
 type LaunchOptions struct {
@@ -66,24 +74,30 @@ type InstanceSummary struct {
 }
 
 type CommonOptions struct {
-	Region          string
-	Image           string
-	Admins          []string
-	AdminPublicKeys []string
-	Context         context.Context
-	CIDRs           []string
-	Registries      []string
-	ProxyTLS        string
-	DNS             string
-	Ports           []string
-	InstanceType    string
-	DefaultPort     string
-	Tags            map[string]string
-	ComposeFiles    []string
-	ComposeOptions  []string
-	PreScript       string
-	Preflight       bool
-	EnableLock      bool
+	ProviderName     string
+	Region           string
+	Image            string
+	Admins           []string
+	AdminPublicKeys  []string
+	Context          context.Context
+	CIDRs            []string
+	Registries       []string
+	ProxyTLS         string
+	DNS              string
+	Ports            []string
+	InstanceType     string
+	DefaultPort      string
+	Tags             map[string]string
+	DeploymentTarget DeploymentTarget
+	ComposeFiles     []string
+	ComposeOptions   []string
+	Chart            string
+	ChartRepository  string
+	ChartValues      []string
+	ChartSet         []string
+	PreScript        string
+	Preflight        bool
+	EnableLock       bool
 }
 
 type DownOptions struct {

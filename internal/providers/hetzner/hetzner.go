@@ -335,31 +335,52 @@ func (p *Provider) BuildUserData(options pullpreview.UserDataOptions) (string, e
 		"  install -m 0755 -d /etc/apt/keyrings",
 		"  apt-get update",
 		"  apt-get install -y ca-certificates curl gnupg lsb-release",
-		"  if echo \"$IMAGE_NAME\" | grep -iq ubuntu; then",
-		"    DISTRO=ubuntu",
-		"  else",
-		"    DISTRO=debian",
-		"  fi",
-		"  curl -fsSL https://download.docker.com/linux/$DISTRO/gpg -o /etc/apt/keyrings/docker.asc",
-		"  chmod a+r /etc/apt/keyrings/docker.asc",
-		"  echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$DISTRO $(lsb_release -cs) stable\" > /etc/apt/sources.list.d/docker.list",
-		"  apt-get update",
-		"  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-		"  systemctl restart docker",
 		"elif command -v dnf >/dev/null 2>&1; then",
 		"  dnf -y install dnf-plugins-core",
-		"  dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
-		"  dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-		"  systemctl restart docker",
 		"elif command -v yum >/dev/null 2>&1; then",
 		"  yum -y install yum-utils",
-		"  yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
-		"  yum -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-		"  systemctl restart docker",
 		"else",
 		"  echo \"unsupported OS family; expected apt, dnf, or yum\"",
 		"  exit 1",
 		"fi",
+	)
+	switch pullpreview.NormalizeDeploymentTarget(string(options.DeploymentTarget)) {
+	case pullpreview.DeploymentTargetHelm:
+		lines = append(lines,
+			"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --disable traefik' sh -",
+			"curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash",
+			"mkdir -p /root/.kube",
+			"cp /etc/rancher/k3s/k3s.yaml /root/.kube/config",
+			"export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",
+			"until kubectl get nodes >/dev/null 2>&1; do sleep 5; done",
+			"until kubectl get nodes -o jsonpath='{range .items[*]}{range .status.conditions[?(@.type==\"Ready\")]}{.status}{\"\\n\"}{end}{end}' | grep -q True; do sleep 5; done",
+		)
+	default:
+		lines = append(lines,
+			"if command -v apt-get >/dev/null 2>&1; then",
+			"  if echo \"$IMAGE_NAME\" | grep -iq ubuntu; then",
+			"    DISTRO=ubuntu",
+			"  else",
+			"    DISTRO=debian",
+			"  fi",
+			"  curl -fsSL https://download.docker.com/linux/$DISTRO/gpg -o /etc/apt/keyrings/docker.asc",
+			"  chmod a+r /etc/apt/keyrings/docker.asc",
+			"  echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$DISTRO $(lsb_release -cs) stable\" > /etc/apt/sources.list.d/docker.list",
+			"  apt-get update",
+			"  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+			"  systemctl restart docker",
+			"elif command -v dnf >/dev/null 2>&1; then",
+			"  dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
+			"  dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+			"  systemctl restart docker",
+			"elif command -v yum >/dev/null 2>&1; then",
+			"  yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
+			"  yum -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+			"  systemctl restart docker",
+			"fi",
+		)
+	}
+	lines = append(lines,
 		"mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready",
 		fmt.Sprintf("chown -R %s:%s /etc/pullpreview", options.Username, options.Username),
 	)
@@ -495,12 +516,15 @@ func (p *Provider) createServer(name string, opts pullpreview.LaunchOptions) (pu
 	if err := p.validateSSHAccessWithRetry(server, privateKey, "", defaultHetznerSSHRetries); err != nil {
 		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, err)
 	}
-	if err := p.deleteCloudSSHKeyIfExists(sshKey); err != nil && p.logger != nil {
-		p.logger.Warnf("Unable to delete temporary Hetzner SSH key %s: %v", keyName, err)
-	}
 	certPrivateKey, cert, err := p.generateSignedAccessCredentials()
 	if err != nil {
-		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, nil, server, err)
+		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, err)
+	}
+	if err := p.validateSSHAccessWithRetry(server, certPrivateKey, cert, defaultHetznerSSHRetries); err != nil {
+		return pullpreview.AccessDetails{}, p.cleanupFailedCreate(name, sshKey, server, err)
+	}
+	if err := p.deleteCloudSSHKeyIfExists(sshKey); err != nil && p.logger != nil {
+		p.logger.Warnf("Unable to delete temporary Hetzner SSH key %s: %v", keyName, err)
 	}
 	if p.logger != nil {
 		p.logger.Infof("Created Hetzner server %s with SSH key %s", server.Name, keyName)
