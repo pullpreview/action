@@ -6,14 +6,14 @@ import (
 )
 
 type BootstrapOptions struct {
-	AppPath            string
-	Username           string
-	SSHPublicKeys      []string
-	DeploymentTarget   DeploymentTarget
-	ImageName          string
-	HostTuning         []string
-	TrustedUserCAKey   string
-	PropagateRootSSH   bool
+	AppPath          string
+	Username         string
+	SSHPublicKeys    []string
+	DeploymentTarget DeploymentTarget
+	ImageName        string
+	HostTuning       []string
+	TrustedUserCAKey string
+	PropagateRootSSH bool
 }
 
 type UserData struct {
@@ -112,9 +112,9 @@ func sharedBootstrapPackagePrep(imageName string) []string {
 		"  apt-get update",
 		"  apt-get install -y ca-certificates curl gnupg lsb-release",
 		"elif command -v dnf >/dev/null 2>&1; then",
-		"  dnf -y install dnf-plugins-core",
+		"  dnf -y install dnf-plugins-core curl",
 		"elif command -v yum >/dev/null 2>&1; then",
-		"  yum -y install yum-utils",
+		"  yum -y install yum-utils curl",
 		"else",
 		"  echo \"unsupported OS family; expected apt, dnf, or yum\"",
 		"  exit 1",
@@ -136,17 +136,36 @@ func sharedComposeRuntime(username string) []string {
 		"  apt-get update",
 		"  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
 		"elif command -v dnf >/dev/null 2>&1; then",
-		"  dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
-		"  dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+		"  if echo \"$IMAGE_NAME\" | grep -Eiq 'amazon[- ]linux'; then",
+		"    yum -y install docker",
+		"  else",
+		"    dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
+		"    dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+		"  fi",
 		"elif command -v yum >/dev/null 2>&1; then",
-		"  yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
-		"  yum -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+		"  if echo \"$IMAGE_NAME\" | grep -Eiq 'amazon[- ]linux'; then",
+		"    yum -y install docker",
+		"  else",
+		"    yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
+		"    yum -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+		"  fi",
+		"fi",
+		"if ! docker compose version >/dev/null 2>&1; then",
+		"  case \"$(uname -m)\" in",
+		"    x86_64|amd64) compose_arch=x86_64 ;;",
+		"    aarch64|arm64) compose_arch=aarch64 ;;",
+		"    *) echo \"unsupported compose architecture $(uname -m)\"; exit 1 ;;",
+		"  esac",
+		"  mkdir -p /usr/local/lib/docker/cli-plugins",
+		"  curl -fsSL \"https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${compose_arch}\" -o /usr/local/lib/docker/cli-plugins/docker-compose",
+		"  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose",
 		"fi",
 	}
 	if strings.TrimSpace(username) != "" && username != "root" {
 		lines = append(lines, fmt.Sprintf("usermod -aG docker %s", username))
 	}
 	lines = append(lines,
+		"docker compose version",
 		"systemctl enable --now docker || systemctl restart docker",
 		"echo 'docker system prune -f && docker image prune -a --filter=\"until=96h\" --force' > /etc/cron.daily/docker-prune && chmod a+x /etc/cron.daily/docker-prune",
 	)

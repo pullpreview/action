@@ -41,6 +41,32 @@ func TestBuildBootstrapScriptComposeIncludesSharedRuntime(t *testing.T) {
 	}
 }
 
+func TestBuildBootstrapScriptComposeOnAmazonLinuxUsesNativeDockerPackage(t *testing.T) {
+	script, err := BuildBootstrapScript(BootstrapOptions{
+		AppPath:          "/app",
+		Username:         "ec2-user",
+		DeploymentTarget: DeploymentTargetCompose,
+		ImageName:        "amazon-linux-2023",
+		PropagateRootSSH: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildBootstrapScript() error: %v", err)
+	}
+
+	checks := []string{
+		"dnf -y install dnf-plugins-core curl",
+		"if echo \"$IMAGE_NAME\" | grep -Eiq 'amazon[- ]linux'; then",
+		"yum -y install docker",
+		"https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${compose_arch}",
+		"docker compose version",
+	}
+	for _, fragment := range checks {
+		if !strings.Contains(script, fragment) {
+			t.Fatalf("expected amazon linux compose bootstrap to contain %q, script:\n%s", fragment, script)
+		}
+	}
+}
+
 func TestBuildBootstrapScriptHelmIncludesReadableKubeconfig(t *testing.T) {
 	script, err := BuildBootstrapScript(BootstrapOptions{
 		AppPath:          "/app",
