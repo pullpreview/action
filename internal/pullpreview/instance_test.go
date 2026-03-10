@@ -19,39 +19,31 @@ func (r *captureRunner) Run(cmd *exec.Cmd) error {
 	return nil
 }
 
-type restoreRetryProvider struct {
-	launchOpts      []LaunchOptions
-	terminateCalls  int
-	accessByAttempt []AccessDetails
+type launchSpyProvider struct {
+	launchOpts     []LaunchOptions
+	terminateCalls int
 }
 
-func (p *restoreRetryProvider) Launch(name string, opts LaunchOptions) (AccessDetails, error) {
+func (p *launchSpyProvider) Launch(name string, opts LaunchOptions) (AccessDetails, error) {
 	p.launchOpts = append(p.launchOpts, opts)
-	if len(p.accessByAttempt) >= len(p.launchOpts) {
-		return p.accessByAttempt[len(p.launchOpts)-1], nil
-	}
 	return AccessDetails{IPAddress: "1.2.3.4", Username: "ec2-user", PrivateKey: "PRIVATE"}, nil
 }
 
-func (p *restoreRetryProvider) Terminate(name string) error {
+func (p *launchSpyProvider) Terminate(name string) error {
 	p.terminateCalls++
 	return nil
 }
 
-func (p *restoreRetryProvider) Running(name string) (bool, error) {
+func (p *launchSpyProvider) Running(name string) (bool, error) {
 	return false, nil
 }
 
-func (p *restoreRetryProvider) ListInstances(tags map[string]string) ([]InstanceSummary, error) {
+func (p *launchSpyProvider) ListInstances(tags map[string]string) ([]InstanceSummary, error) {
 	return nil, nil
 }
 
-func (p *restoreRetryProvider) Username() string {
+func (p *launchSpyProvider) Username() string {
 	return "ec2-user"
-}
-
-func (p *restoreRetryProvider) SupportsRestore() bool {
-	return true
 }
 
 func TestPortsWithDefaultsDeduplicatesValues(t *testing.T) {
@@ -279,8 +271,8 @@ func TestSSHReadyDiagnosticIncludesRemoteDetails(t *testing.T) {
 	}
 }
 
-func TestLaunchAndWaitRetriesWithoutRestoreAfterSSHTimeout(t *testing.T) {
-	provider := &restoreRetryProvider{}
+func TestLaunchAndWaitReturnsDirectlyAfterSSHTimeout(t *testing.T) {
+	provider := &launchSpyProvider{}
 	inst := NewInstance("my-app", CommonOptions{}, provider, nil)
 
 	originalWait := waitUntilInstanceSSHReady
@@ -289,10 +281,7 @@ func TestLaunchAndWaitRetriesWithoutRestoreAfterSSHTimeout(t *testing.T) {
 	waitCalls := 0
 	waitUntilInstanceSSHReady = func(ctx context.Context, probe func() bool) bool {
 		waitCalls++
-		if waitCalls == 1 {
-			return false
-		}
-		return true
+		return false
 	}
 
 	originalSSH := runSSHCombinedOutput
@@ -302,19 +291,17 @@ func TestLaunchAndWaitRetriesWithoutRestoreAfterSSHTimeout(t *testing.T) {
 		return []byte("ready-marker-missing"), errors.New("exit status 1")
 	}
 
-	if err := inst.LaunchAndWait(); err != nil {
-		t.Fatalf("LaunchAndWait() error: %v", err)
+	err := inst.LaunchAndWait()
+	if !errors.Is(err, errInstanceSSHUnavailable) {
+		t.Fatalf("LaunchAndWait() error = %v, want %v", err, errInstanceSSHUnavailable)
 	}
-	if len(provider.launchOpts) != 2 {
-		t.Fatalf("expected two launch attempts, got %d", len(provider.launchOpts))
+	if len(provider.launchOpts) != 1 {
+		t.Fatalf("expected one launch attempt, got %d", len(provider.launchOpts))
 	}
-	if provider.launchOpts[0].SkipRestore {
-		t.Fatalf("did not expect first launch to skip restore")
+	if waitCalls != 1 {
+		t.Fatalf("expected one SSH wait cycle, got %d", waitCalls)
 	}
-	if !provider.launchOpts[1].SkipRestore {
-		t.Fatalf("expected second launch to skip restore")
-	}
-	if provider.terminateCalls != 1 {
-		t.Fatalf("expected one terminate before retry, got %d", provider.terminateCalls)
+	if provider.terminateCalls != 0 {
+		t.Fatalf("did not expect terminate on SSH timeout, got %d", provider.terminateCalls)
 	}
 }

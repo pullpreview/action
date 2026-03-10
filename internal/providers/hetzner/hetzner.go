@@ -292,14 +292,6 @@ func (p *Provider) DisplayName() string {
 	return "Hetzner Cloud"
 }
 
-func (p *Provider) SupportsSnapshots() bool {
-	return false
-}
-
-func (p *Provider) SupportsRestore() bool {
-	return false
-}
-
 func (p *Provider) SupportsFirewall() bool {
 	return true
 }

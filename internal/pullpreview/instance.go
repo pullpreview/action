@@ -213,37 +213,8 @@ func (i *Instance) ValidateDeploymentConfig() error {
 }
 
 func (i *Instance) LaunchAndWait() error {
-	if err := i.launchAndWait(false); err == nil {
-		return nil
-	} else {
-		restoreProvider, ok := i.Provider.(SupportsRestore)
-		if !errors.Is(err, errInstanceSSHUnavailable) || !ok || !restoreProvider.SupportsRestore() {
-			return err
-		}
-		if i.Logger != nil {
-			i.Logger.Warnf(
-				"Instance name=%s never became SSH ready after %s. Terminating restored instance and retrying once with snapshot restore disabled.",
-				i.Name,
-				instanceSSHReadyWaitWindow,
-			)
-		}
-		if terminateErr := i.Terminate(); terminateErr != nil {
-			return fmt.Errorf("fresh-create retry failed to terminate %s: %w", i.Name, terminateErr)
-		}
-		if i.Logger != nil {
-			i.Logger.Infof("Retrying instance launch name=%s skip_restore=true", i.Name)
-		}
-		return i.launchAndWait(true)
-	}
-}
-
-func (i *Instance) launchAndWait(skipRestore bool) error {
-	createMessage := "Creating or restoring"
-	if skipRestore {
-		createMessage = "Creating fresh"
-	}
 	if i.Logger != nil {
-		i.Logger.Infof("%s instance name=%s size=%s", createMessage, i.Name, i.Size)
+		i.Logger.Infof("Creating instance name=%s size=%s", i.Name, i.Size)
 	}
 
 	userData := UserData{
@@ -264,12 +235,11 @@ func (i *Instance) launchAndWait(skipRestore bool) error {
 		userData = generatedUserData
 	}
 	access, err := i.Provider.Launch(i.Name, LaunchOptions{
-		Size:        i.Size,
-		UserData:    userData,
-		Ports:       i.PortsWithDefaults(),
-		CIDRs:       i.CIDRs,
-		Tags:        i.Tags,
-		SkipRestore: skipRestore,
+		Size:     i.Size,
+		UserData: userData,
+		Ports:    i.PortsWithDefaults(),
+		CIDRs:    i.CIDRs,
+		Tags:     i.Tags,
 	})
 	if err != nil {
 		return err

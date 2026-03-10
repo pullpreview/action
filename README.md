@@ -29,7 +29,7 @@ Adding the label triggers the deployment. A PR comment appears immediately with 
 
 ### Step 2 — Instance is provisioned
 
-PullPreview creates (or restores) a preview instance and waits for SSH access.
+PullPreview creates a preview instance and waits for SSH access.
 
 <img src="img/02-deploying.png">
 
@@ -116,7 +116,7 @@ All supported `with:` inputs from `action.yml`:
 | `ports` | `80/tcp,443/tcp` | Firewall ports to expose publicly (SSH `22` is always open). |
 | `cidrs` | `0.0.0.0/0` | Allowed source CIDR ranges for exposed ports. |
 | `default_port` | `80` | Port used to build the preview URL output. |
-| `deployment_target` | `compose` | Deployment target: `compose` or `helm` (`helm` supports Hetzner and Lightsail; Lightsail Helm v1 skips snapshot restore). |
+| `deployment_target` | `compose` | Deployment target: `compose` or `helm` (`helm` supports Hetzner and Lightsail). |
 | `compose_files` | `docker-compose.yml` | Comma-separated Compose files passed to deploy. |
 | `compose_options` | `--build` | Additional options appended to `docker compose up`. |
 | `chart` | `""` | Helm chart reference: local path (`./chart` or `../chart`), repo chart name (`wordpress`), or OCI reference (`oci://...`) (`deployment_target: helm`). |
@@ -143,7 +143,7 @@ Notes:
 - For `deployment_target: helm`, `registries` is not supported yet; use public images or chart-managed pull secrets instead.
 - `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
 - SSH key fetches are cached between runs in the action cache.
-- For Lightsail, configure `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Lightsail Helm previews support fresh deploys and same-instance redeploys; snapshot restore remains compose-only in this first pass.
+- For Lightsail, configure `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Lightsail previews support fresh deploys and same-instance redeploys.
 - For Hetzner, configure credentials and defaults via action inputs and environment: `HCLOUD_TOKEN` (required), `HETZNER_CA_KEY` (required), optional `region` and `image` (`region` defaults to `nbg1`, `image` defaults to `ubuntu-24.04`). `instance_type` defaults to `cpx21` when provider is Hetzner.
 - `HETZNER_CA_KEY` must be an SSH private key (RSA or Ed25519) for the instance-access CA. PullPreview signs a per-run ephemeral login key with this CA key and uses SSH certificates (`...-cert.pub`) instead of reusing a persistent private key across runs.
 - Scheduled cleanup is scoped by workflow label and repo, and sweeps all deployment variants for that label. Separate labels such as `pullpreview` and `pullpreview-helm` do not clean up each other's instances.
