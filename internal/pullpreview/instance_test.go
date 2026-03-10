@@ -271,7 +271,7 @@ func TestSSHReadyDiagnosticIncludesRemoteDetails(t *testing.T) {
 	}
 }
 
-func TestLaunchAndWaitReturnsDirectlyAfterSSHTimeout(t *testing.T) {
+func TestLaunchAndWaitRetriesOnceAfterSSHTimeout(t *testing.T) {
 	provider := &launchSpyProvider{}
 	inst := NewInstance("my-app", CommonOptions{}, provider, nil)
 
@@ -295,13 +295,13 @@ func TestLaunchAndWaitReturnsDirectlyAfterSSHTimeout(t *testing.T) {
 	if !errors.Is(err, errInstanceSSHUnavailable) {
 		t.Fatalf("LaunchAndWait() error = %v, want %v", err, errInstanceSSHUnavailable)
 	}
-	if len(provider.launchOpts) != 1 {
-		t.Fatalf("expected one launch attempt, got %d", len(provider.launchOpts))
+	if len(provider.launchOpts) != 2 {
+		t.Fatalf("expected two launch attempts, got %d", len(provider.launchOpts))
 	}
-	if waitCalls != 1 {
-		t.Fatalf("expected one SSH wait cycle, got %d", waitCalls)
+	if waitCalls != 2 {
+		t.Fatalf("expected two SSH wait cycles, got %d", waitCalls)
 	}
-	if provider.terminateCalls != 0 {
-		t.Fatalf("did not expect terminate on SSH timeout, got %d", provider.terminateCalls)
+	if provider.terminateCalls != 1 {
+		t.Fatalf("expected one terminate on SSH timeout, got %d", provider.terminateCalls)
 	}
 }
