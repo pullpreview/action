@@ -66,14 +66,6 @@ func (p *Provider) DisplayName() string {
 	return "AWS Lightsail"
 }
 
-func (p *Provider) SupportsSnapshots() bool {
-	return true
-}
-
-func (p *Provider) SupportsRestore() bool {
-	return true
-}
-
 func (p *Provider) SupportsFirewall() bool {
 	return true
 }

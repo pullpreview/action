@@ -3,7 +3,6 @@ package lightsail
 import (
 	"context"
 	"errors"
-	"sort"
 	"strings"
 	"time"
 
@@ -35,11 +34,9 @@ type lightsailClient interface {
 	GetInstanceState(context.Context, *ls.GetInstanceStateInput, ...func(*ls.Options)) (*ls.GetInstanceStateOutput, error)
 	DeleteInstance(context.Context, *ls.DeleteInstanceInput, ...func(*ls.Options)) (*ls.DeleteInstanceOutput, error)
 	CreateInstances(context.Context, *ls.CreateInstancesInput, ...func(*ls.Options)) (*ls.CreateInstancesOutput, error)
-	CreateInstancesFromSnapshot(context.Context, *ls.CreateInstancesFromSnapshotInput, ...func(*ls.Options)) (*ls.CreateInstancesFromSnapshotOutput, error)
 	PutInstancePublicPorts(context.Context, *ls.PutInstancePublicPortsInput, ...func(*ls.Options)) (*ls.PutInstancePublicPortsOutput, error)
 	GetInstanceAccessDetails(context.Context, *ls.GetInstanceAccessDetailsInput, ...func(*ls.Options)) (*ls.GetInstanceAccessDetailsOutput, error)
 	GetInstance(context.Context, *ls.GetInstanceInput, ...func(*ls.Options)) (*ls.GetInstanceOutput, error)
-	GetInstanceSnapshots(context.Context, *ls.GetInstanceSnapshotsInput, ...func(*ls.Options)) (*ls.GetInstanceSnapshotsOutput, error)
 	GetInstances(context.Context, *ls.GetInstancesInput, ...func(*ls.Options)) (*ls.GetInstancesOutput, error)
 	GetRegions(context.Context, *ls.GetRegionsInput, ...func(*ls.Options)) (*ls.GetRegionsOutput, error)
 	GetBlueprints(context.Context, *ls.GetBlueprintsInput, ...func(*ls.Options)) (*ls.GetBlueprintsOutput, error)
@@ -79,10 +76,6 @@ func (a lightsailClientAdapter) CreateInstances(ctx context.Context, input *ls.C
 	return a.client.CreateInstances(ctx, input, optFns...)
 }
 
-func (a lightsailClientAdapter) CreateInstancesFromSnapshot(ctx context.Context, input *ls.CreateInstancesFromSnapshotInput, optFns ...func(*ls.Options)) (*ls.CreateInstancesFromSnapshotOutput, error) {
-	return a.client.CreateInstancesFromSnapshot(ctx, input, optFns...)
-}
-
 func (a lightsailClientAdapter) PutInstancePublicPorts(ctx context.Context, input *ls.PutInstancePublicPortsInput, optFns ...func(*ls.Options)) (*ls.PutInstancePublicPortsOutput, error) {
 	return a.client.PutInstancePublicPorts(ctx, input, optFns...)
 }
@@ -93,10 +86,6 @@ func (a lightsailClientAdapter) GetInstanceAccessDetails(ctx context.Context, in
 
 func (a lightsailClientAdapter) GetInstance(ctx context.Context, input *ls.GetInstanceInput, optFns ...func(*ls.Options)) (*ls.GetInstanceOutput, error) {
 	return a.client.GetInstance(ctx, input, optFns...)
-}
-
-func (a lightsailClientAdapter) GetInstanceSnapshots(ctx context.Context, input *ls.GetInstanceSnapshotsInput, optFns ...func(*ls.Options)) (*ls.GetInstanceSnapshotsOutput, error) {
-	return a.client.GetInstanceSnapshots(ctx, input, optFns...)
 }
 
 func (a lightsailClientAdapter) GetInstances(ctx context.Context, input *ls.GetInstancesInput, optFns ...func(*ls.Options)) (*ls.GetInstancesOutput, error) {
@@ -145,7 +134,7 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 			return pullpreview.AccessDetails{}, err
 		}
 		if existing == nil {
-			if err := p.launchOrRestore(name, opts); err != nil {
+			if err := p.launchInstance(name, opts); err != nil {
 				return pullpreview.AccessDetails{}, err
 			}
 			if err := p.waitUntilRunning(name); err != nil {
@@ -170,7 +159,7 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 			return pullpreview.AccessDetails{}, err
 		}
 		if !running {
-			if err := p.launchOrRestore(name, opts); err != nil {
+			if err := p.launchInstance(name, opts); err != nil {
 				return pullpreview.AccessDetails{}, err
 			}
 			if err := p.waitUntilRunning(name); err != nil {
@@ -185,7 +174,7 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 	return p.fetchAccessDetails(name)
 }
 
-func (p *Provider) launchOrRestore(name string, opts pullpreview.LaunchOptions) error {
+func (p *Provider) launchInstance(name string, opts pullpreview.LaunchOptions) error {
 	bundleID, err := p.bundleID(opts.Size)
 	if err != nil {
 		return err
@@ -201,43 +190,6 @@ func (p *Provider) launchOrRestore(name string, opts pullpreview.LaunchOptions) 
 		Tags:             toLightsailTags(mergeTags(map[string]string{"stack": pullpreview.StackName}, opts.Tags)),
 		UserData:         aws.String(opts.UserData),
 		BlueprintId:      aws.String(p.blueprintID()),
-	}
-
-	snapshot := p.latestSnapshot(name)
-	switch {
-	case opts.SkipRestore:
-		if p.logger != nil {
-			p.logger.Infof("Skipping snapshot restore for %q: fresh-create retry requested", name)
-		}
-		snapshot = nil
-	case strings.EqualFold(strings.TrimSpace(opts.Tags["pullpreview_target"]), string(pullpreview.DeploymentTargetHelm)):
-		if p.logger != nil {
-			p.logger.Infof("Skipping snapshot restore for %q: deployment_target=helm", name)
-		}
-		snapshot = nil
-	}
-	if snapshot != nil {
-		if p.logger != nil {
-			createdAt := "unknown"
-			if snapshot.CreatedAt != nil {
-				createdAt = snapshot.CreatedAt.UTC().Format(time.RFC3339)
-			}
-			p.logger.Infof(
-				"Restoring Lightsail snapshot name=%s created_at=%s from_instance=%s",
-				aws.ToString(snapshot.Name),
-				createdAt,
-				aws.ToString(snapshot.FromInstanceName),
-			)
-		}
-		_, err := p.client.CreateInstancesFromSnapshot(p.ctx, &ls.CreateInstancesFromSnapshotInput{
-			InstanceNames:        []string{name},
-			AvailabilityZone:     aws.String(zones[0]),
-			BundleId:             aws.String(bundleID),
-			Tags:                 params.Tags,
-			UserData:             aws.String(opts.UserData),
-			InstanceSnapshotName: snapshot.Name,
-		})
-		return err
 	}
 	if p.logger != nil {
 		p.logger.Infof("Creating fresh Lightsail instance name=%s", name)
@@ -370,29 +322,6 @@ func (p *Provider) instanceByName(name string) (*types.Instance, error) {
 		return nil, nil
 	}
 	return resp.Instance, nil
-}
-
-func (p *Provider) latestSnapshot(name string) *types.InstanceSnapshot {
-	resp, err := p.client.GetInstanceSnapshots(p.ctx, &ls.GetInstanceSnapshotsInput{})
-	if err != nil {
-		return nil
-	}
-	snapshots := resp.InstanceSnapshots
-	sort.Slice(snapshots, func(i, j int) bool {
-		if snapshots[i].CreatedAt == nil {
-			return false
-		}
-		if snapshots[j].CreatedAt == nil {
-			return true
-		}
-		return snapshots[i].CreatedAt.After(*snapshots[j].CreatedAt)
-	})
-	for _, snap := range snapshots {
-		if snap.State == types.InstanceSnapshotStateAvailable && aws.ToString(snap.FromInstanceName) == name {
-			return &snap
-		}
-	}
-	return nil
 }
 
 func (p *Provider) ListInstances(tags map[string]string) ([]pullpreview.InstanceSummary, error) {

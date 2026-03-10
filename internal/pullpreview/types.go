@@ -25,14 +25,6 @@ type ProviderMetadata interface {
 	DisplayName() string
 }
 
-type SupportsSnapshots interface {
-	SupportsSnapshots() bool
-}
-
-type SupportsRestore interface {
-	SupportsRestore() bool
-}
-
 type SupportsFirewall interface {
 	SupportsFirewall() bool
 }
@@ -60,12 +52,11 @@ type UserDataOptions struct {
 }
 
 type LaunchOptions struct {
-	Size        string
-	UserData    string
-	Ports       []string
-	CIDRs       []string
-	Tags        map[string]string
-	SkipRestore bool
+	Size     string
+	UserData string
+	Ports    []string
+	CIDRs    []string
+	Tags     map[string]string
 }
 
 type InstanceSummary struct {
