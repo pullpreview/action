@@ -35,6 +35,20 @@ func WaitUntilContext(ctx context.Context, maxRetries int, interval time.Duratio
 	}
 }
 
+func pollAttemptsForWindow(window, interval time.Duration) int {
+	if window <= 0 || interval <= 0 {
+		return 1
+	}
+
+	// WaitUntilContext checks once before sleeping, so add one attempt to cover
+	// the full window when the probe fails quickly.
+	attempts := int(window / interval)
+	if window%interval != 0 {
+		attempts++
+	}
+	return attempts + 1
+}
+
 func EnsureContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()
