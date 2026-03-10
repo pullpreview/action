@@ -14,7 +14,11 @@ import (
 	"time"
 )
 
-const remoteAppPath = "/app"
+const (
+	remoteAppPath              = "/app"
+	instanceSSHReadyInterval   = 5 * time.Second
+	instanceSSHReadyWaitWindow = 5 * time.Minute
+)
 
 type Runner interface {
 	Run(cmd *exec.Cmd) error
@@ -225,7 +229,7 @@ func (i *Instance) LaunchAndWait() error {
 			i.Username(),
 		)
 	}
-	if ok := WaitUntilContext(i.Context, 30, 5*time.Second, func() bool {
+	if ok := WaitUntilContext(i.Context, pollAttemptsForWindow(instanceSSHReadyWaitWindow, instanceSSHReadyInterval), instanceSSHReadyInterval, func() bool {
 		if i.Logger != nil {
 			i.Logger.Infof(
 				"Waiting for SSH username=%s ip=%s ssh=\"ssh %s\"",
