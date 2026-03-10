@@ -61,7 +61,7 @@ jobs:
           body=""
           for attempt in $(seq 1 90); do
             body="$(curl -fsSL --max-time 30 "${PREVIEW_URL}" || true)"
-            if printf '%s' "${body}" | grep -Eqi 'OpenProject|Sign in'; then
+            if grep -Eqi 'OpenProject|Sign in' <<<"${body}"; then
               echo "OpenProject smoke v1 checks passed for ${PREVIEW_URL}"
               exit 0
             fi
@@ -121,7 +121,7 @@ jobs:
           body=""
           for attempt in $(seq 1 90); do
             body="$(curl -fsSL --max-time 30 "${PREVIEW_URL}" || true)"
-            if printf '%s' "${body}" | grep -Eqi 'OpenProject|Sign in'; then
+            if grep -Eqi 'OpenProject|Sign in' <<<"${body}"; then
               echo "OpenProject smoke v2 checks passed for ${PREVIEW_URL}"
               exit 0
             fi
