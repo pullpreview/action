@@ -244,6 +244,23 @@ func TestInlinePreScriptLoadsLocalScriptContent(t *testing.T) {
 	}
 }
 
+func TestInlinePreScriptSkipsRegistryLoginForHelm(t *testing.T) {
+	appPath := t.TempDir()
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Registries:       []string{"docker://alice:secret@ghcr.io"},
+	}, outputTestProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "ec2-user"}
+
+	inline, err := inst.inlinePreScript(appPath)
+	if err != nil {
+		t.Fatalf("inlinePreScript() error: %v", err)
+	}
+	if strings.Contains(inline, "docker login") {
+		t.Fatalf("did not expect docker login in helm pre-script, got %q", inline)
+	}
+}
+
 func TestParseDockerPSOutputJSONLines(t *testing.T) {
 	raw := strings.Join([]string{
 		`{"Names":"app-web-1","Status":"Exited (1) 5 seconds ago","Labels":"com.docker.compose.project=app,com.docker.compose.service=web"}`,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -558,10 +559,10 @@ func TestClearDanglingDeploymentsDestroysInstancesNotLinkedToActivePR(t *testing
 	}
 	provider := &scheduledCleanupProvider{
 		instances: []InstanceSummary{
-			{Name: "gh-1-pr-10", Tags: map[string]string{"pr_number": "10"}},
-			{Name: "gh-1-pr-11", Tags: map[string]string{"pr_number": "11"}},
-			{Name: "gh-1-branch-main", Tags: map[string]string{"pullpreview_branch": "main"}},
-			{Name: "gh-1-branch-feature-x", Tags: map[string]string{}}, // legacy branch instance without branch tag
+			{Name: "gh-1-pr-10", Tags: map[string]string{"pr_number": "10", "pullpreview_label": "pullpreview-custom"}},
+			{Name: "gh-1-pr-11", Tags: map[string]string{"pr_number": "11", "pullpreview_label": "pullpreview-custom"}},
+			{Name: "gh-1-branch-main", Tags: map[string]string{"pullpreview_branch": "main", "pullpreview_label": "pullpreview-custom"}},
+			{Name: "gh-1-branch-feature-x", Tags: map[string]string{"pullpreview_label": "pullpreview-custom"}},
 		},
 	}
 	destroyed := []string{}
@@ -605,14 +606,29 @@ func TestClearDanglingDeploymentsDestroysInstancesNotLinkedToActivePR(t *testing
 	}
 }
 
-func TestClearDanglingDeploymentsScopesCleanupByDeploymentVariant(t *testing.T) {
-	client := &fakeGitHub{}
+func TestClearDanglingDeploymentsCleansAllVariantsForMatchingLabel(t *testing.T) {
+	client := &fakeGitHub{
+		issues: []*gh.Issue{
+			{
+				Number:           gh.Int(10),
+				State:            gh.String("open"),
+				PullRequestLinks: &gh.PullRequestLinks{},
+			},
+			{
+				Number:           gh.Int(20),
+				State:            gh.String("closed"),
+				PullRequestLinks: &gh.PullRequestLinks{},
+			},
+		},
+	}
 	provider := &scheduledCleanupProvider{
 		instances: []InstanceSummary{
 			{Name: "gh-1-env1-pr-10", Tags: map[string]string{"pr_number": "10", "pullpreview_variant": "env1"}},
+			{Name: "gh-1-env2-pr-10", Tags: map[string]string{"pr_number": "10", "pullpreview_variant": "env2"}},
+			{Name: "gh-1-env1-pr-20", Tags: map[string]string{"pr_number": "20", "pullpreview_variant": "env1"}},
 			{Name: "gh-1-env2-pr-20", Tags: map[string]string{"pr_number": "20", "pullpreview_variant": "env2"}},
 			{Name: "gh-1-env1-pr-30", Tags: map[string]string{}}, // legacy env1 instance without variant tag
-			{Name: "gh-1-env2-pr-40", Tags: map[string]string{}}, // legacy env2 instance without variant tag
+			{Name: "gh-1-env2-pr-30", Tags: map[string]string{}}, // legacy env2 instance without variant tag
 		},
 	}
 	destroyed := []string{}
@@ -632,13 +648,13 @@ func TestClearDanglingDeploymentsScopesCleanupByDeploymentVariant(t *testing.T) 
 	}
 
 	sort.Strings(destroyed)
-	wantDestroyed := []string{"gh-1-env1-pr-10", "gh-1-env1-pr-30"}
+	wantDestroyed := []string{"gh-1-env1-pr-20", "gh-1-env1-pr-30", "gh-1-env2-pr-20", "gh-1-env2-pr-30"}
 	if strings.Join(destroyed, ",") != strings.Join(wantDestroyed, ",") {
-		t.Fatalf("unexpected destroyed instances for env1 cleanup: got=%v want=%v", destroyed, wantDestroyed)
+		t.Fatalf("unexpected destroyed instances for label-wide cleanup: got=%v want=%v", destroyed, wantDestroyed)
 	}
 }
 
-func TestClearDanglingDeploymentsWithoutVariantSkipsVariantInstances(t *testing.T) {
+func TestClearDanglingDeploymentsWithoutVariantCleansAllVariants(t *testing.T) {
 	client := &fakeGitHub{}
 	provider := &scheduledCleanupProvider{
 		instances: []InstanceSummary{
@@ -663,9 +679,9 @@ func TestClearDanglingDeploymentsWithoutVariantSkipsVariantInstances(t *testing.
 	}
 
 	sort.Strings(destroyed)
-	wantDestroyed := []string{"gh-1-pr-10"}
+	wantDestroyed := []string{"gh-1-env1-pr-20", "gh-1-env2-pr-30", "gh-1-pr-10"}
 	if strings.Join(destroyed, ",") != strings.Join(wantDestroyed, ",") {
-		t.Fatalf("unexpected destroyed instances for default cleanup: got=%v want=%v", destroyed, wantDestroyed)
+		t.Fatalf("unexpected destroyed instances for label-wide cleanup without variant: got=%v want=%v", destroyed, wantDestroyed)
 	}
 }
 
@@ -849,11 +865,41 @@ func TestInstanceMatchesCleanupLabel(t *testing.T) {
 		t.Fatalf("expected mismatched label tag to be skipped")
 	}
 
-	if !instanceMatchesCleanupLabel(InstanceSummary{
+	if instanceMatchesCleanupLabel(InstanceSummary{
 		Name: "gh-1-pr-10",
 		Tags: map[string]string{},
 	}, "pullpreview-helm") {
-		t.Fatalf("expected legacy instance without label tag to remain eligible")
+		t.Fatalf("expected missing label tag to be rejected for scoped labels")
+	}
+
+	if !instanceMatchesCleanupLabel(InstanceSummary{
+		Name: "gh-1-pr-10",
+		Tags: map[string]string{},
+	}, "pullpreview") {
+		t.Fatalf("expected legacy instance without label tag to remain eligible for default label")
+	}
+}
+
+func TestInstanceMatchesCleanupTarget(t *testing.T) {
+	if !instanceMatchesCleanupTarget(InstanceSummary{
+		Name: "gh-1-pr-10",
+		Tags: map[string]string{"pullpreview_target": "helm"},
+	}, DeploymentTargetHelm) {
+		t.Fatalf("expected explicit target tag to match")
+	}
+
+	if instanceMatchesCleanupTarget(InstanceSummary{
+		Name: "gh-1-pr-10",
+		Tags: map[string]string{},
+	}, DeploymentTargetHelm) {
+		t.Fatalf("expected missing target tag to be rejected for helm cleanup")
+	}
+
+	if !instanceMatchesCleanupTarget(InstanceSummary{
+		Name: "gh-1-pr-10",
+		Tags: map[string]string{},
+	}, DeploymentTargetCompose) {
+		t.Fatalf("expected missing target tag to remain eligible for compose cleanup")
 	}
 }
 
@@ -861,12 +907,128 @@ func TestDefaultInstanceTagsIncludeCanonicalLabel(t *testing.T) {
 	event := loadFixtureEvent(t, "github_event_labeled.json")
 	sync := newSync(event, GithubSyncOptions{
 		Label:  "PullPreview Helm",
-		Common: CommonOptions{},
+		Common: CommonOptions{DeploymentTarget: DeploymentTargetHelm},
 	}, &fakeGitHub{}, fakeProvider{running: true})
 
 	tags := sync.defaultInstanceTags()
 	if tags["pullpreview_label"] != "pullpreview-helm" {
 		t.Fatalf("unexpected canonical label tag: %#v", tags)
+	}
+	if tags["pullpreview_target"] != "helm" || tags["pullpreview_runtime"] != "k3s" {
+		t.Fatalf("expected target/runtime tags, got %#v", tags)
+	}
+	if tags["pullpreview_scope"] == "" {
+		t.Fatalf("expected non-default label scope tag, got %#v", tags)
+	}
+}
+
+func TestInstanceNameUsesScopeForNonDefaultLabel(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+
+	defaultSync := newSync(event, GithubSyncOptions{
+		Label:  "pullpreview",
+		Common: CommonOptions{},
+	}, &fakeGitHub{}, fakeProvider{running: true})
+	expectedDefault := NormalizeName(fmt.Sprintf("gh-%d-pr-%d", defaultSync.repoID(), defaultSync.prNumber()))
+	if got := defaultSync.instanceName(); got != expectedDefault {
+		t.Fatalf("unexpected default label instance name: %q", got)
+	}
+
+	helmSync := newSync(event, GithubSyncOptions{
+		Label:  "pullpreview-helm",
+		Common: CommonOptions{DeploymentTarget: DeploymentTargetHelm},
+	}, &fakeGitHub{}, fakeProvider{running: true})
+	scope := labelScopeKey("pullpreview-helm")
+	if scope == "" {
+		t.Fatalf("expected non-empty scope for non-default label")
+	}
+	if !strings.Contains(helmSync.instanceName(), scope) {
+		t.Fatalf("expected instance name %q to include scope %q", helmSync.instanceName(), scope)
+	}
+	if !strings.Contains(helmSync.instanceSubdomain(), scope) {
+		t.Fatalf("expected subdomain %q to include scope %q", helmSync.instanceSubdomain(), scope)
+	}
+}
+
+func TestMatchingScopeInstanceNamesIncludesLegacyInstanceForScopedLabel(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_unlabeled.json")
+	event.Label = &GitHubLabel{Name: "pullpreview-helm"}
+	if event.PullRequest != nil {
+		event.PullRequest.Labels = []GitHubLabel{}
+	}
+	provider := &scheduledCleanupProvider{
+		instances: []InstanceSummary{
+			{
+				Name: NormalizeName(fmt.Sprintf("gh-%d-pr-%d", event.Repository.ID, event.PullRequest.Number)),
+				Tags: map[string]string{
+					"pr_number":          fmt.Sprintf("%d", event.PullRequest.Number),
+					"pullpreview_label":  "pullpreview-helm",
+					"pullpreview_target": "helm",
+				},
+			},
+		},
+	}
+	client := &fakeGitHub{}
+	sync := newSync(event, GithubSyncOptions{
+		Label:  "pullpreview-helm",
+		Common: CommonOptions{DeploymentTarget: DeploymentTargetHelm},
+	}, client, provider)
+
+	inst := provider.instances[0]
+	ref, ok := cleanupInstanceReference(inst)
+	if !ok {
+		t.Fatalf("expected cleanup reference for instance %#v", inst)
+	}
+	if ref.PRNumber != fmt.Sprintf("%d", event.PullRequest.Number) {
+		t.Fatalf("unexpected cleanup ref %#v for event PR %d", ref, event.PullRequest.Number)
+	}
+	if !instanceMatchesCleanupLabel(inst, sync.opts.Label) {
+		t.Fatalf("expected label filter to match instance %#v", inst)
+	}
+	if !instanceMatchesCleanupVariant(inst, sync.opts.DeploymentVariant) {
+		t.Fatalf("expected variant filter to match instance %#v", inst)
+	}
+	if !instanceMatchesCleanupTarget(inst, sync.opts.Common.DeploymentTarget) {
+		t.Fatalf("expected target filter to match instance %#v", inst)
+	}
+
+	names, err := sync.matchingScopeInstanceNames()
+	if err != nil {
+		t.Fatalf("matchingScopeInstanceNames() error: %v", err)
+	}
+	expectedName := NormalizeName(fmt.Sprintf("gh-%d-pr-%d", event.Repository.ID, event.PullRequest.Number))
+	if len(names) != 1 || names[0] != expectedName {
+		t.Fatalf("expected legacy instance match, got %v", names)
+	}
+}
+
+func TestMatchingScopeInstanceNamesSkipsUntaggedLegacyInstanceForScopedLabel(t *testing.T) {
+	event := loadFixtureEvent(t, "github_event_unlabeled.json")
+	event.Label = &GitHubLabel{Name: "pullpreview-helm"}
+	if event.PullRequest != nil {
+		event.PullRequest.Labels = []GitHubLabel{}
+	}
+	provider := &scheduledCleanupProvider{
+		instances: []InstanceSummary{
+			{
+				Name: NormalizeName(fmt.Sprintf("gh-%d-pr-%d", event.Repository.ID, event.PullRequest.Number)),
+				Tags: map[string]string{
+					"pr_number": fmt.Sprintf("%d", event.PullRequest.Number),
+				},
+			},
+		},
+	}
+	sync := newSync(event, GithubSyncOptions{
+		Label:  "pullpreview-helm",
+		Common: CommonOptions{DeploymentTarget: DeploymentTargetHelm},
+	}, &fakeGitHub{}, provider)
+
+	names, err := sync.matchingScopeInstanceNames()
+	if err != nil {
+		t.Fatalf("matchingScopeInstanceNames() error: %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("expected untagged legacy instance to be skipped, got %v", names)
 	}
 }
 

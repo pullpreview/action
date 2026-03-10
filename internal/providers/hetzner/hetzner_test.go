@@ -157,7 +157,7 @@ func TestBuildUserDataBranchesAndPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildUserData() for helm error: %v", err)
 	}
-	if !strings.Contains(helmScript, "INSTALL_K3S_EXEC='server --disable traefik'") {
+	if !strings.Contains(helmScript, "INSTALL_K3S_EXEC='server --disable traefik --write-kubeconfig-mode 0644'") {
 		t.Fatalf("expected k3s install command in helm script: %s", helmScript)
 	}
 	if !strings.Contains(helmScript, "get-helm-3") {
@@ -578,6 +578,52 @@ func TestHetznerLaunchLifecycleRecreateWhenPublicIPMissing(t *testing.T) {
 	}
 	if client.serverCreateCalls != 1 {
 		t.Fatalf("expected one create call when public IP missing, got %d", client.serverCreateCalls)
+	}
+}
+
+func TestHetznerLaunchLifecycleRecreatesWhenDeploymentIdentityMismatches(t *testing.T) {
+	provider := mustNewProviderWithContext(t, Config{
+		APIToken:        "token",
+		Location:        defaultHetznerLocation,
+		Image:           defaultHetznerImage,
+		SSHUsername:     defaultHetznerSSHUser,
+		SSHKeysCacheDir: t.TempDir(),
+	})
+	instance := "gh-1-pr-1"
+	existing := makeTestServer(instance, "198.51.100.1", hcloud.ServerStatusRunning, nil)
+	existing.Labels = map[string]string{
+		"pullpreview_label":   "pullpreview-helm",
+		"pullpreview_target":  "helm",
+		"pullpreview_runtime": "k3s",
+	}
+	created := makeTestServer(instance, "203.0.113.10", hcloud.ServerStatusRunning, nil)
+	client := &fakeHcloudClient{
+		serverListResponses: [][]*hcloud.Server{{existing}, nil},
+		sshKeyCreateResult:  mustTestSSHKey(12),
+		serverCreateResult:  hcloud.ServerCreateResult{Server: created},
+	}
+	provider.client = client
+	originalRunSSHCommand := runSSHCommand
+	defer func() { runSSHCommand = originalRunSSHCommand }()
+	runSSHCommand = func(context.Context, string, string, string, string) ([]byte, error) {
+		return []byte("ok"), nil
+	}
+
+	_, err := provider.Launch(instance, pullpreview.LaunchOptions{
+		Tags: map[string]string{
+			"pullpreview_label":   "pullpreview",
+			"pullpreview_target":  "compose",
+			"pullpreview_runtime": "docker",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Launch() error: %v", err)
+	}
+	if client.serverDeleteCalls != 1 {
+		t.Fatalf("expected one delete call for identity mismatch, got %d", client.serverDeleteCalls)
+	}
+	if client.serverCreateCalls != 1 {
+		t.Fatalf("expected one create call after identity mismatch, got %d", client.serverCreateCalls)
 	}
 }
 

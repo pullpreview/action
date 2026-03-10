@@ -130,6 +130,13 @@ func providerName(provider Provider) string {
 	return ""
 }
 
+func providerSupportsDeploymentTarget(provider Provider, target DeploymentTarget) bool {
+	if supported, ok := provider.(SupportsDeploymentTarget); ok {
+		return supported.SupportsDeploymentTarget(target)
+	}
+	return NormalizeDeploymentTarget(string(target)) == DeploymentTargetCompose
+}
+
 func sameStringSlice(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
@@ -153,14 +160,17 @@ func (i *Instance) ValidateDeploymentConfig() error {
 			return fmt.Errorf("chart, chart_repository, chart_values, and chart_set require deployment_target=helm")
 		}
 	case DeploymentTargetHelm:
-		if name := providerName(i.Provider); name != "hetzner" {
-			return fmt.Errorf("deployment_target=helm currently requires provider=hetzner")
+		if !providerSupportsDeploymentTarget(i.Provider, DeploymentTargetHelm) {
+			return fmt.Errorf("deployment_target=helm is unsupported for provider=%s", providerName(i.Provider))
 		}
 		if strings.TrimSpace(i.Chart) == "" {
 			return fmt.Errorf("deployment_target=helm requires chart")
 		}
 		if strings.TrimSpace(i.ProxyTLS) == "" {
 			return fmt.Errorf("deployment_target=helm requires proxy_tls")
+		}
+		if len(uniqueStrings(i.Registries)) > 0 {
+			return fmt.Errorf("registries is unsupported with deployment_target=helm")
 		}
 		if len(i.ComposeFiles) > 0 && !sameStringSlice(i.ComposeFiles, []string{"docker-compose.yml"}) {
 			return fmt.Errorf("compose_files is unsupported with deployment_target=helm")

@@ -25,10 +25,29 @@ var sizeMap = map[string]string{
 }
 
 type Provider struct {
-	client *ls.Client
+	client lightsailClient
 	ctx    context.Context
 	region string
 	logger *pullpreview.Logger
+}
+
+type lightsailClient interface {
+	GetInstanceState(context.Context, *ls.GetInstanceStateInput, ...func(*ls.Options)) (*ls.GetInstanceStateOutput, error)
+	DeleteInstance(context.Context, *ls.DeleteInstanceInput, ...func(*ls.Options)) (*ls.DeleteInstanceOutput, error)
+	CreateInstances(context.Context, *ls.CreateInstancesInput, ...func(*ls.Options)) (*ls.CreateInstancesOutput, error)
+	CreateInstancesFromSnapshot(context.Context, *ls.CreateInstancesFromSnapshotInput, ...func(*ls.Options)) (*ls.CreateInstancesFromSnapshotOutput, error)
+	PutInstancePublicPorts(context.Context, *ls.PutInstancePublicPortsInput, ...func(*ls.Options)) (*ls.PutInstancePublicPortsOutput, error)
+	GetInstanceAccessDetails(context.Context, *ls.GetInstanceAccessDetailsInput, ...func(*ls.Options)) (*ls.GetInstanceAccessDetailsOutput, error)
+	GetInstance(context.Context, *ls.GetInstanceInput, ...func(*ls.Options)) (*ls.GetInstanceOutput, error)
+	GetInstanceSnapshots(context.Context, *ls.GetInstanceSnapshotsInput, ...func(*ls.Options)) (*ls.GetInstanceSnapshotsOutput, error)
+	GetInstances(context.Context, *ls.GetInstancesInput, ...func(*ls.Options)) (*ls.GetInstancesOutput, error)
+	GetRegions(context.Context, *ls.GetRegionsInput, ...func(*ls.Options)) (*ls.GetRegionsOutput, error)
+	GetBlueprints(context.Context, *ls.GetBlueprintsInput, ...func(*ls.Options)) (*ls.GetBlueprintsOutput, error)
+	GetBundles(context.Context, *ls.GetBundlesInput, ...func(*ls.Options)) (*ls.GetBundlesOutput, error)
+}
+
+type lightsailClientAdapter struct {
+	client *ls.Client
 }
 
 func New(ctx context.Context, region string, logger *pullpreview.Logger) (*Provider, error) {
@@ -41,11 +60,59 @@ func New(ctx context.Context, region string, logger *pullpreview.Logger) (*Provi
 		return nil, err
 	}
 	return &Provider{
-		client: ls.NewFromConfig(cfg),
+		client: lightsailClientAdapter{client: ls.NewFromConfig(cfg)},
 		ctx:    ctx,
 		region: region,
 		logger: logger,
 	}, nil
+}
+
+func (a lightsailClientAdapter) GetInstanceState(ctx context.Context, input *ls.GetInstanceStateInput, optFns ...func(*ls.Options)) (*ls.GetInstanceStateOutput, error) {
+	return a.client.GetInstanceState(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) DeleteInstance(ctx context.Context, input *ls.DeleteInstanceInput, optFns ...func(*ls.Options)) (*ls.DeleteInstanceOutput, error) {
+	return a.client.DeleteInstance(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) CreateInstances(ctx context.Context, input *ls.CreateInstancesInput, optFns ...func(*ls.Options)) (*ls.CreateInstancesOutput, error) {
+	return a.client.CreateInstances(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) CreateInstancesFromSnapshot(ctx context.Context, input *ls.CreateInstancesFromSnapshotInput, optFns ...func(*ls.Options)) (*ls.CreateInstancesFromSnapshotOutput, error) {
+	return a.client.CreateInstancesFromSnapshot(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) PutInstancePublicPorts(ctx context.Context, input *ls.PutInstancePublicPortsInput, optFns ...func(*ls.Options)) (*ls.PutInstancePublicPortsOutput, error) {
+	return a.client.PutInstancePublicPorts(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) GetInstanceAccessDetails(ctx context.Context, input *ls.GetInstanceAccessDetailsInput, optFns ...func(*ls.Options)) (*ls.GetInstanceAccessDetailsOutput, error) {
+	return a.client.GetInstanceAccessDetails(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) GetInstance(ctx context.Context, input *ls.GetInstanceInput, optFns ...func(*ls.Options)) (*ls.GetInstanceOutput, error) {
+	return a.client.GetInstance(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) GetInstanceSnapshots(ctx context.Context, input *ls.GetInstanceSnapshotsInput, optFns ...func(*ls.Options)) (*ls.GetInstanceSnapshotsOutput, error) {
+	return a.client.GetInstanceSnapshots(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) GetInstances(ctx context.Context, input *ls.GetInstancesInput, optFns ...func(*ls.Options)) (*ls.GetInstancesOutput, error) {
+	return a.client.GetInstances(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) GetRegions(ctx context.Context, input *ls.GetRegionsInput, optFns ...func(*ls.Options)) (*ls.GetRegionsOutput, error) {
+	return a.client.GetRegions(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) GetBlueprints(ctx context.Context, input *ls.GetBlueprintsInput, optFns ...func(*ls.Options)) (*ls.GetBlueprintsOutput, error) {
+	return a.client.GetBlueprints(ctx, input, optFns...)
+}
+
+func (a lightsailClientAdapter) GetBundles(ctx context.Context, input *ls.GetBundlesInput, optFns ...func(*ls.Options)) (*ls.GetBundlesOutput, error) {
+	return a.client.GetBundles(ctx, input, optFns...)
 }
 
 func (p *Provider) Running(name string) (bool, error) {
@@ -75,17 +142,45 @@ func (p *Provider) Terminate(name string) error {
 }
 
 func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullpreview.AccessDetails, error) {
-	running, err := p.Running(name)
-	if err != nil {
-		return pullpreview.AccessDetails{}, err
-	}
-	if !running {
-		if err := p.launchOrRestore(name, opts); err != nil {
+	for {
+		existing, err := p.instanceByName(name)
+		if err != nil {
 			return pullpreview.AccessDetails{}, err
 		}
-		if err := p.waitUntilRunning(name); err != nil {
+		if existing == nil {
+			if err := p.launchOrRestore(name, opts); err != nil {
+				return pullpreview.AccessDetails{}, err
+			}
+			if err := p.waitUntilRunning(name); err != nil {
+				return pullpreview.AccessDetails{}, err
+			}
+			break
+		}
+		if reason, mismatch := pullpreview.DeploymentIdentityMismatch(tagsToMap(existing.Tags), opts.Tags); mismatch {
+			if p.logger != nil {
+				p.logger.Warnf("Existing Lightsail instance %q has incompatible deployment identity (%s); recreating instance", name, reason)
+			}
+			if err := p.Terminate(name); err != nil {
+				return pullpreview.AccessDetails{}, err
+			}
+			if err := p.waitUntilDeleted(name); err != nil {
+				return pullpreview.AccessDetails{}, err
+			}
+			continue
+		}
+		running, err := p.Running(name)
+		if err != nil {
 			return pullpreview.AccessDetails{}, err
 		}
+		if !running {
+			if err := p.launchOrRestore(name, opts); err != nil {
+				return pullpreview.AccessDetails{}, err
+			}
+			if err := p.waitUntilRunning(name); err != nil {
+				return pullpreview.AccessDetails{}, err
+			}
+		}
+		break
 	}
 	if err := p.setupFirewall(name, opts.CIDRs, opts.Ports); err != nil {
 		return pullpreview.AccessDetails{}, err
@@ -112,6 +207,9 @@ func (p *Provider) launchOrRestore(name string, opts pullpreview.LaunchOptions) 
 	}
 
 	snapshot := p.latestSnapshot(name)
+	if strings.EqualFold(strings.TrimSpace(opts.Tags["pullpreview_target"]), string(pullpreview.DeploymentTargetHelm)) {
+		snapshot = nil
+	}
 	if snapshot != nil {
 		if p.logger != nil {
 			p.logger.Infof("Found snapshot to restore from: %s", aws.ToString(snapshot.Name))
@@ -152,6 +250,17 @@ func (p *Provider) waitUntilRunning(name string) error {
 	})
 	if !ok {
 		return errors.New("timeout while waiting for instance running")
+	}
+	return nil
+}
+
+func (p *Provider) waitUntilDeleted(name string) error {
+	ok := pullpreview.WaitUntilContext(p.ctx, 30, 5*time.Second, func() bool {
+		inst, err := p.instanceByName(name)
+		return err == nil && inst == nil
+	})
+	if !ok {
+		return errors.New("timeout while waiting for instance deletion")
 	}
 	return nil
 }
@@ -228,6 +337,21 @@ func (p *Provider) fetchAccessDetails(name string) (pullpreview.AccessDetails, e
 		CertKey:    aws.ToString(resp.AccessDetails.CertKey),
 		PrivateKey: aws.ToString(resp.AccessDetails.PrivateKey),
 	}, nil
+}
+
+func (p *Provider) instanceByName(name string) (*types.Instance, error) {
+	resp, err := p.client.GetInstance(p.ctx, &ls.GetInstanceInput{InstanceName: aws.String(name)})
+	if err != nil {
+		var nf *types.NotFoundException
+		if errors.As(err, &nf) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if resp.Instance == nil {
+		return nil, nil
+	}
+	return resp.Instance, nil
 }
 
 func (p *Provider) latestSnapshot(name string) *types.InstanceSnapshot {

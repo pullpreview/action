@@ -17,6 +17,15 @@ func (f fakeProvider) DisplayName() string {
 	return "Hetzner Cloud"
 }
 
+func (f fakeProvider) SupportsDeploymentTarget(target DeploymentTarget) bool {
+	switch NormalizeDeploymentTarget(string(target)) {
+	case DeploymentTargetCompose, DeploymentTargetHelm:
+		return true
+	default:
+		return false
+	}
+}
+
 type fakeLightsailProvider struct{}
 
 func (f fakeLightsailProvider) Launch(name string, opts LaunchOptions) (AccessDetails, error) {
@@ -39,6 +48,15 @@ func (f fakeLightsailProvider) Name() string {
 
 func (f fakeLightsailProvider) DisplayName() string {
 	return "AWS Lightsail"
+}
+
+func (f fakeLightsailProvider) SupportsDeploymentTarget(target DeploymentTarget) bool {
+	switch NormalizeDeploymentTarget(string(target)) {
+	case DeploymentTargetCompose, DeploymentTargetHelm:
+		return true
+	default:
+		return false
+	}
 }
 
 type scriptCaptureRunner struct {
@@ -97,15 +115,15 @@ func TestValidateDeploymentConfigRejectsComposeWithHelmOptions(t *testing.T) {
 	}
 }
 
-func TestValidateDeploymentConfigRejectsHelmForNonHetznerProvider(t *testing.T) {
+func TestValidateDeploymentConfigAcceptsHelmForLightsailProvider(t *testing.T) {
 	inst := NewInstance("demo", CommonOptions{
 		DeploymentTarget: DeploymentTargetHelm,
 		Chart:            "wordpress",
 		ProxyTLS:         "app-wordpress:80",
 	}, fakeLightsailProvider{}, nil)
 
-	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "provider=hetzner") {
-		t.Fatalf("expected provider validation error, got %v", err)
+	if err := inst.ValidateDeploymentConfig(); err != nil {
+		t.Fatalf("expected lightsail helm validation to pass, got %v", err)
 	}
 }
 
@@ -130,6 +148,19 @@ func TestValidateDeploymentConfigRejectsHelmSpecificComposeOverrides(t *testing.
 
 	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "compose_options") {
 		t.Fatalf("expected compose_options validation error, got %v", err)
+	}
+}
+
+func TestValidateDeploymentConfigRejectsHelmRegistries(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ProxyTLS:         "app-wordpress:80",
+		Registries:       []string{"docker://alice:secret@ghcr.io"},
+	}, fakeProvider{}, nil)
+
+	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "registries") {
+		t.Fatalf("expected registries validation error, got %v", err)
 	}
 }
 
@@ -175,6 +206,44 @@ func TestResolveHelmChartSourceForLocalChart(t *testing.T) {
 	}
 	if !source.RequiresSync {
 		t.Fatalf("expected local chart to require sync")
+	}
+	if !source.SyncAppTree {
+		t.Fatalf("expected in-tree chart to sync app tree")
+	}
+}
+
+func TestResolveHelmChartSourceForLocalChartOutsideAppPath(t *testing.T) {
+	root := t.TempDir()
+	appPath := filepath.Join(root, "app")
+	chartPath := filepath.Join(root, "chart")
+	if err := os.MkdirAll(appPath, 0755); err != nil {
+		t.Fatalf("mkdir app path: %v", err)
+	}
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: demo\nversion: 0.1.0\n"), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "../chart",
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+
+	source, err := inst.resolveHelmChartSource(appPath)
+	if err != nil {
+		t.Fatalf("resolveHelmChartSource() error: %v", err)
+	}
+	if source.ChartRef == "" || !strings.HasPrefix(source.ChartRef, "/app/.pullpreview/charts/") {
+		t.Fatalf("unexpected external chart ref: %q", source.ChartRef)
+	}
+	if !source.RequiresSync {
+		t.Fatalf("expected external chart to require sync")
+	}
+	if source.SyncAppTree {
+		t.Fatalf("did not expect external chart to require full app tree sync")
 	}
 }
 
