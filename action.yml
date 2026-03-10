@@ -46,15 +46,15 @@ inputs:
     required: false
     default: "--build"
   deployment_target:
-    description: "Deployment target to use: compose or helm"
+    description: "Deployment target to use: compose or helm (helm supports Hetzner and Lightsail)"
     required: false
     default: "compose"
   chart:
-    description: "Helm chart path, name, or OCI reference (helm target only)"
+    description: "Helm chart reference: local path, repo chart name, or OCI reference (helm target only)"
     required: false
     default: ""
   chart_repository:
-    description: "Helm repository URL to use with chart (helm target only)"
+    description: "Helm repository URL used when chart is a repo chart name (helm target only)"
     required: false
     default: ""
   chart_values:
@@ -90,7 +90,7 @@ inputs:
     required: false
     default: "lightsail"
   registries:
-    description: "Names of private registries to authenticate against. E.g. docker://username:password@ghcr.io"
+    description: "Names of private registries to authenticate against for compose deployments. E.g. docker://username:password@ghcr.io"
     required: false
     default: ""
   proxy_tls:

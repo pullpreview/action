@@ -37,6 +37,10 @@ type SupportsFirewall interface {
 	SupportsFirewall() bool
 }
 
+type SupportsDeploymentTarget interface {
+	SupportsDeploymentTarget(target DeploymentTarget) bool
+}
+
 type UserDataProvider interface {
 	BuildUserData(options UserDataOptions) (string, error)
 }

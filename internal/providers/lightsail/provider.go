@@ -78,13 +78,32 @@ func (p *Provider) SupportsFirewall() bool {
 	return true
 }
 
-func (p *Provider) BuildUserData(options pullpreview.UserDataOptions) (string, error) {
-	script := pullpreview.UserData{
-		AppPath:       options.AppPath,
-		SSHPublicKeys: options.SSHPublicKeys,
-		Username:      options.Username,
+func (p *Provider) SupportsDeploymentTarget(target pullpreview.DeploymentTarget) bool {
+	switch pullpreview.NormalizeDeploymentTarget(string(target)) {
+	case pullpreview.DeploymentTargetCompose, pullpreview.DeploymentTargetHelm:
+		return true
+	default:
+		return false
 	}
-	return script.Script(), nil
+}
+
+func (p *Provider) BuildUserData(options pullpreview.UserDataOptions) (string, error) {
+	return pullpreview.BuildBootstrapScript(pullpreview.BootstrapOptions{
+		AppPath:          options.AppPath,
+		Username:         options.Username,
+		SSHPublicKeys:    options.SSHPublicKeys,
+		DeploymentTarget: options.DeploymentTarget,
+		ImageName:        "amazon-linux-2023",
+		HostTuning: []string{
+			"test -s /swapfile || ( fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab )",
+			"systemctl disable --now tmp.mount",
+			"systemctl mask tmp.mount",
+			"sysctl vm.swappiness=10 && sysctl vm.vfs_cache_pressure=50",
+			"echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf",
+			"echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf",
+		},
+		PropagateRootSSH: true,
+	})
 }
 
 func init() {

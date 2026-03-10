@@ -202,7 +202,7 @@ func clearDanglingDeployments(repo string, opts GithubSyncOptions, provider Prov
 		if !instanceMatchesCleanupLabel(inst, opts.Label) {
 			continue
 		}
-		if !instanceMatchesCleanupVariant(inst, opts.DeploymentVariant) {
+		if !instanceMatchesCleanupTarget(inst, opts.Common.DeploymentTarget) {
 			continue
 		}
 		ref, ok := cleanupInstanceReference(inst)
@@ -330,7 +330,7 @@ func instanceMatchesCleanupVariant(inst InstanceSummary, expectedVariant string)
 }
 
 func canonicalCleanupLabel(label string) string {
-	return strings.ToLower(NormalizeName(strings.TrimSpace(label)))
+	return canonicalLabelValue(label)
 }
 
 func instanceMatchesCleanupLabel(inst InstanceSummary, expectedLabel string) bool {
@@ -340,8 +340,21 @@ func instanceMatchesCleanupLabel(inst InstanceSummary, expectedLabel string) boo
 	}
 	actual := canonicalCleanupLabel(firstTagValue(inst.Tags, "pullpreview_label"))
 	if actual == "" {
-		return true
+		return expected == defaultPullPreviewLabel
 	}
+	return actual == expected
+}
+
+func instanceMatchesCleanupTarget(inst InstanceSummary, expectedTarget DeploymentTarget) bool {
+	expected := NormalizeDeploymentTarget(string(expectedTarget))
+	if expected == "" {
+		expected = DeploymentTargetCompose
+	}
+	actualRaw := strings.TrimSpace(firstTagValue(inst.Tags, "pullpreview_target"))
+	if actualRaw == "" {
+		return expected == DeploymentTargetCompose
+	}
+	actual := NormalizeDeploymentTarget(actualRaw)
 	return actual == expected
 }
 
@@ -475,13 +488,27 @@ func (g *GithubSync) Sync() error {
 	case actionPRDown, actionBranchDown:
 		instance := NewInstance(g.instanceName(), g.opts.Common, g.provider, g.logger)
 		_ = g.updateGitHubStatus(statusDestroying, "")
+		namesToDestroy := []string{}
 		running, _ := instance.Running()
 		if running {
-			if g.runDown != nil {
-				_ = g.runDown(DownOptions{Name: instance.Name}, g.provider, g.logger)
+			namesToDestroy = append(namesToDestroy, instance.Name)
+		}
+		if extraNames, err := g.matchingScopeInstanceNames(); err != nil {
+			if g.logger != nil {
+				g.logger.Warnf("Unable to list matching instances for cleanup: %v", err)
 			}
-		} else if g.logger != nil {
-			g.logger.Warnf("Instance %s already down. Continuing...", instance.Name)
+		} else {
+			namesToDestroy = append(namesToDestroy, extraNames...)
+		}
+		namesToDestroy = uniqueStrings(namesToDestroy)
+		if len(namesToDestroy) == 0 {
+			if g.logger != nil {
+				g.logger.Warnf("No matching instances found for cleanup. Continuing...")
+			}
+		} else if g.runDown != nil {
+			for _, name := range namesToDestroy {
+				_ = g.runDown(DownOptions{Name: name}, g.provider, g.logger)
+			}
 		}
 		if g.prClosed() {
 			if g.logger != nil {
@@ -1065,8 +1092,15 @@ func (g *GithubSync) validateDeploymentVariant() error {
 	return nil
 }
 
+func (g *GithubSync) instanceScopeKey() string {
+	return labelScopeKey(g.opts.Label)
+}
+
 func (g *GithubSync) instanceName() string {
 	parts := []string{"gh", fmt.Sprintf("%d", g.repoID())}
+	if scope := g.instanceScopeKey(); scope != "" {
+		parts = append(parts, scope)
+	}
 	if g.deploymentVariant() != "" {
 		parts = append(parts, g.deploymentVariant())
 	}
@@ -1080,6 +1114,9 @@ func (g *GithubSync) instanceName() string {
 
 func (g *GithubSync) instanceSubdomain() string {
 	components := []string{}
+	if scope := g.instanceScopeKey(); scope != "" {
+		components = append(components, scope)
+	}
 	if g.deploymentVariant() != "" {
 		components = append(components, g.deploymentVariant())
 	}
@@ -1095,15 +1132,24 @@ func (g *GithubSync) instanceSubdomain() string {
 }
 
 func (g *GithubSync) defaultInstanceTags() map[string]string {
+	target := NormalizeDeploymentTarget(string(g.opts.Common.DeploymentTarget))
+	if target == "" {
+		target = DeploymentTargetCompose
+	}
 	tags := map[string]string{
-		"repo_name":         g.repoName(),
-		"repo_id":           fmt.Sprintf("%d", g.repoID()),
-		"org_name":          g.orgName(),
-		"org_id":            fmt.Sprintf("%d", g.orgID()),
-		"version":           Version,
-		"pullpreview_repo":  g.repo(),
-		"pullpreview_kind":  "branch",
-		"pullpreview_label": canonicalCleanupLabel(g.opts.Label),
+		"repo_name":           g.repoName(),
+		"repo_id":             fmt.Sprintf("%d", g.repoID()),
+		"org_name":            g.orgName(),
+		"org_id":              fmt.Sprintf("%d", g.orgID()),
+		"version":             Version,
+		"pullpreview_repo":    g.repo(),
+		"pullpreview_kind":    "branch",
+		"pullpreview_label":   canonicalCleanupLabel(g.opts.Label),
+		"pullpreview_target":  string(target),
+		"pullpreview_runtime": deploymentRuntime(target),
+	}
+	if scope := g.instanceScopeKey(); scope != "" {
+		tags["pullpreview_scope"] = scope
 	}
 	if branch := g.branch(); branch != "" {
 		tags["pullpreview_branch"] = branch
@@ -1125,6 +1171,52 @@ func (g *GithubSync) buildInstance() *Instance {
 	instance := NewInstance(g.instanceName(), common, g.provider, g.logger)
 	instance.WithSubdomain(g.instanceSubdomain())
 	return instance
+}
+
+func (g *GithubSync) currentCleanupRef() cleanupInstanceRef {
+	if g.prNumber() != 0 {
+		return cleanupInstanceRef{PRNumber: fmt.Sprintf("%d", g.prNumber())}
+	}
+	branch := g.branch()
+	return cleanupInstanceRef{Branch: branch, BranchNormalized: NormalizeName(branch)}
+}
+
+func (g *GithubSync) matchingScopeInstanceNames() ([]string, error) {
+	instances, err := g.provider.ListInstances(repoCleanupTags(g.repo()))
+	if err != nil {
+		return nil, err
+	}
+	ref := g.currentCleanupRef()
+	names := []string{}
+	for _, inst := range instances {
+		if !instanceMatchesCleanupLabel(inst, g.opts.Label) {
+			continue
+		}
+		if !instanceMatchesCleanupVariant(inst, g.opts.DeploymentVariant) {
+			continue
+		}
+		if !instanceMatchesCleanupTarget(inst, g.opts.Common.DeploymentTarget) {
+			continue
+		}
+		instRef, ok := cleanupInstanceReference(inst)
+		if !ok {
+			continue
+		}
+		switch {
+		case ref.PRNumber != "":
+			if instRef.PRNumber != ref.PRNumber {
+				continue
+			}
+		case ref.BranchNormalized != "":
+			if instRef.BranchNormalized != ref.BranchNormalized {
+				continue
+			}
+		default:
+			continue
+		}
+		names = append(names, inst.Name)
+	}
+	return uniqueStrings(names), nil
 }
 
 func mergeStringMap(base, extra map[string]string) map[string]string {

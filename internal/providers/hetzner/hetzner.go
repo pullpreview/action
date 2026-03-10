@@ -304,97 +304,25 @@ func (p *Provider) SupportsFirewall() bool {
 	return true
 }
 
-func (p *Provider) BuildUserData(options pullpreview.UserDataOptions) (string, error) {
-	lines := []string{
-		"#!/usr/bin/env bash",
-		"set -xe ; set -o pipefail",
-	}
-	homeDir := pullpreview.HomeDirForUser(options.Username)
-	lines = append(lines, fmt.Sprintf("mkdir -p %s/.ssh", homeDir))
-	if options.Username != "root" {
-		lines = append(lines, "if [ -f /root/.ssh/authorized_keys ]; then")
-		lines = append(lines, fmt.Sprintf("  cp /root/.ssh/authorized_keys %s/.ssh/authorized_keys", homeDir))
-		lines = append(lines, "fi")
-	}
-	if len(options.SSHPublicKeys) > 0 {
-		lines = append(lines, fmt.Sprintf("echo '%s' >> %s/.ssh/authorized_keys", strings.Join(options.SSHPublicKeys, "\n"), homeDir))
-	}
-	if options.Username != "root" || len(options.SSHPublicKeys) > 0 {
-		lines = append(lines,
-			fmt.Sprintf("chown -R %s:%s %s/.ssh", options.Username, options.Username, homeDir),
-			fmt.Sprintf("chmod 0700 %s/.ssh && chmod 0600 %s/.ssh/authorized_keys", homeDir, homeDir),
-		)
-	}
-	lines = append(lines,
-		fmt.Sprintf("mkdir -p %s && chown -R %s:%s %s", options.AppPath, options.Username, options.Username, options.AppPath),
-		"mkdir -p /etc/profile.d",
-		fmt.Sprintf("echo 'cd %s' > /etc/profile.d/pullpreview.sh", options.AppPath),
-		fmt.Sprintf("IMAGE_NAME=%q", p.image),
-		"if command -v apt-get >/dev/null 2>&1; then",
-		"  mkdir -p /etc/apt/keyrings",
-		"  install -m 0755 -d /etc/apt/keyrings",
-		"  apt-get update",
-		"  apt-get install -y ca-certificates curl gnupg lsb-release",
-		"elif command -v dnf >/dev/null 2>&1; then",
-		"  dnf -y install dnf-plugins-core",
-		"elif command -v yum >/dev/null 2>&1; then",
-		"  yum -y install yum-utils",
-		"else",
-		"  echo \"unsupported OS family; expected apt, dnf, or yum\"",
-		"  exit 1",
-		"fi",
-	)
-	switch pullpreview.NormalizeDeploymentTarget(string(options.DeploymentTarget)) {
-	case pullpreview.DeploymentTargetHelm:
-		lines = append(lines,
-			"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --disable traefik' sh -",
-			"curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash",
-			"mkdir -p /root/.kube",
-			"cp /etc/rancher/k3s/k3s.yaml /root/.kube/config",
-			"export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",
-			"until kubectl get nodes >/dev/null 2>&1; do sleep 5; done",
-			"until kubectl get nodes -o jsonpath='{range .items[*]}{range .status.conditions[?(@.type==\"Ready\")]}{.status}{\"\\n\"}{end}{end}' | grep -q True; do sleep 5; done",
-		)
+func (p *Provider) SupportsDeploymentTarget(target pullpreview.DeploymentTarget) bool {
+	switch pullpreview.NormalizeDeploymentTarget(string(target)) {
+	case pullpreview.DeploymentTargetCompose, pullpreview.DeploymentTargetHelm:
+		return true
 	default:
-		lines = append(lines,
-			"if command -v apt-get >/dev/null 2>&1; then",
-			"  if echo \"$IMAGE_NAME\" | grep -iq ubuntu; then",
-			"    DISTRO=ubuntu",
-			"  else",
-			"    DISTRO=debian",
-			"  fi",
-			"  curl -fsSL https://download.docker.com/linux/$DISTRO/gpg -o /etc/apt/keyrings/docker.asc",
-			"  chmod a+r /etc/apt/keyrings/docker.asc",
-			"  echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$DISTRO $(lsb_release -cs) stable\" > /etc/apt/sources.list.d/docker.list",
-			"  apt-get update",
-			"  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-			"  systemctl restart docker",
-			"elif command -v dnf >/dev/null 2>&1; then",
-			"  dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
-			"  dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-			"  systemctl restart docker",
-			"elif command -v yum >/dev/null 2>&1; then",
-			"  yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo",
-			"  yum -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-			"  systemctl restart docker",
-			"fi",
-		)
+		return false
 	}
-	lines = append(lines,
-		"mkdir -p /etc/pullpreview && touch /etc/pullpreview/ready",
-		fmt.Sprintf("chown -R %s:%s /etc/pullpreview", options.Username, options.Username),
-	)
-	if strings.TrimSpace(p.caPublicKey) != "" {
-		lines = append(lines,
-			"mkdir -p /etc/ssh/sshd_config.d",
-			fmt.Sprintf("cat <<'EOF' > /etc/ssh/pullpreview-user-ca.pub\n%s\nEOF", p.caPublicKey),
-			"cat <<'EOF' > /etc/ssh/sshd_config.d/pullpreview.conf",
-			"TrustedUserCAKeys /etc/ssh/pullpreview-user-ca.pub",
-			"EOF",
-			"systemctl restart ssh || systemctl restart sshd || true",
-		)
-	}
-	return strings.Join(lines, "\n"), nil
+}
+
+func (p *Provider) BuildUserData(options pullpreview.UserDataOptions) (string, error) {
+	return pullpreview.BuildBootstrapScript(pullpreview.BootstrapOptions{
+		AppPath:          options.AppPath,
+		Username:         options.Username,
+		SSHPublicKeys:    options.SSHPublicKeys,
+		DeploymentTarget: options.DeploymentTarget,
+		ImageName:        p.image,
+		TrustedUserCAKey: p.caPublicKey,
+		PropagateRootSSH: true,
+	})
 }
 
 func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullpreview.AccessDetails, error) {
@@ -405,6 +333,15 @@ func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullprev
 		}
 		if existing == nil {
 			return p.createServer(name, opts)
+		}
+		if reason, mismatch := pullpreview.DeploymentIdentityMismatch(labelsOrEmpty(existing.Labels), opts.Tags); mismatch {
+			if p.logger != nil {
+				p.logger.Warnf("Existing Hetzner instance %q has incompatible deployment identity (%s); recreating instance", name, reason)
+			}
+			if err := p.destroyInstanceAndCache(existing, name); err != nil {
+				return pullpreview.AccessDetails{}, err
+			}
+			continue
 		}
 		if err := p.ensureServerRunning(existing); err != nil {
 			return pullpreview.AccessDetails{}, err

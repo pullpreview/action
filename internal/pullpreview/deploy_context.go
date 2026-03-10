@@ -278,6 +278,25 @@ func (i *Instance) syncRemoteBindMountSources(syncPlan []bindMountSync) error {
 	return nil
 }
 
+func (i *Instance) syncRemotePath(localSource, remoteSource string) error {
+	info, err := os.Stat(localSource)
+	if err != nil {
+		return err
+	}
+	entry := bindMountSync{
+		LocalSource:  localSource,
+		RemoteSource: remoteSource,
+		IsDir:        info.IsDir(),
+	}
+	if i.Logger != nil {
+		i.Logger.Infof("Syncing local path to remote host local=%s remote=%s", localSource, remoteSource)
+	}
+	if err := i.ensureRemoteBindMountTargets([]bindMountSync{entry}); err != nil {
+		return err
+	}
+	return i.rsyncBindMount(entry)
+}
+
 func (i *Instance) ensureRemoteBindMountTargets(syncPlan []bindMountSync) error {
 	user := i.Username()
 	remoteDirs := map[string]struct{}{
@@ -376,11 +395,13 @@ func (i *Instance) inlinePreScript(appPath string) (string, error) {
 		fmt.Sprintf("source %s", remoteEnvPath),
 		"set +a",
 	}
-	for _, registry := range ParseRegistryCredentials(i.Registries, i.Logger) {
-		lines = append(lines,
-			fmt.Sprintf("echo \"Logging into %s...\"", registry.Host),
-			fmt.Sprintf("echo \"%s\" | docker login \"%s\" -u \"%s\" --password-stdin", registry.Password, registry.Host, registry.Username),
-		)
+	if i.DeploymentTarget == DeploymentTargetCompose {
+		for _, registry := range ParseRegistryCredentials(i.Registries, i.Logger) {
+			lines = append(lines,
+				fmt.Sprintf("echo \"Logging into %s...\"", registry.Host),
+				fmt.Sprintf("echo \"%s\" | docker login \"%s\" -u \"%s\" --password-stdin", registry.Password, registry.Host, registry.Username),
+			)
+		}
 	}
 	if strings.TrimSpace(i.PreScript) == "" {
 		return strings.Join(lines, "\n") + "\n", nil

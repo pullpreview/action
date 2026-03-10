@@ -20,6 +20,7 @@ type helmChartSource struct {
 	LocalChart   string
 	RepoURL      string
 	RequiresSync bool
+	SyncAppTree  bool
 }
 
 func (i *Instance) HelmNamespace() string {
@@ -83,8 +84,13 @@ func (i *Instance) DeployWithHelm(appPath string) error {
 		return err
 	}
 
-	if chartSource.RequiresSync || syncForValues {
+	if chartSource.SyncAppTree || syncForValues {
 		if err := i.syncRemoteAppTree(appPath); err != nil {
+			return err
+		}
+	}
+	if chartSource.RequiresSync && chartSource.LocalChart != "" && !chartSource.SyncAppTree {
+		if err := i.syncRemotePath(chartSource.LocalChart, chartSource.ChartRef); err != nil {
 			return err
 		}
 	}
@@ -125,15 +131,60 @@ func (i *Instance) resolveHelmChartSource(appPath string) (helmChartSource, erro
 	if _, err := os.Stat(localChart); err != nil {
 		return helmChartSource{}, fmt.Errorf("unable to access chart %s: %w", chart, err)
 	}
-	remoteChart, err := remoteBindSource(localChart, absAppPath, remoteAppPath)
-	if err != nil {
-		return helmChartSource{}, fmt.Errorf("chart %s: %w", chart, err)
+	if pathWithinRoot(absAppPath, localChart) {
+		remoteChart, err := remoteBindSource(localChart, absAppPath, remoteAppPath)
+		if err != nil {
+			return helmChartSource{}, fmt.Errorf("chart %s: %w", chart, err)
+		}
+		return helmChartSource{
+			ChartRef:     remoteChart,
+			LocalChart:   localChart,
+			RequiresSync: true,
+			SyncAppTree:  true,
+		}, nil
 	}
 	return helmChartSource{
-		ChartRef:     remoteChart,
+		ChartRef:     externalHelmChartPath(localChart),
 		LocalChart:   localChart,
 		RequiresSync: true,
 	}, nil
+}
+
+func pathWithinRoot(root, candidate string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func externalHelmChartPath(localChart string) string {
+	sum := fmt.Sprintf("%x", sha1.Sum([]byte(filepath.Clean(localChart))))
+	name := sanitizeRemotePathComponent(filepath.Base(localChart))
+	return remoteAppPath + "/.pullpreview/charts/" + sum[:12] + "/" + name
+}
+
+func sanitizeRemotePathComponent(value string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(value) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-.")
+	if name == "" {
+		return "chart"
+	}
+	return name
 }
 
 func (i *Instance) helmValueArgs(appPath string) ([]string, bool, error) {
