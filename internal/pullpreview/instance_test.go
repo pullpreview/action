@@ -1,6 +1,7 @@
 package pullpreview
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -16,6 +17,41 @@ type captureRunner struct {
 func (r *captureRunner) Run(cmd *exec.Cmd) error {
 	r.args = append(r.args, append([]string{}, cmd.Args...))
 	return nil
+}
+
+type restoreRetryProvider struct {
+	launchOpts      []LaunchOptions
+	terminateCalls  int
+	accessByAttempt []AccessDetails
+}
+
+func (p *restoreRetryProvider) Launch(name string, opts LaunchOptions) (AccessDetails, error) {
+	p.launchOpts = append(p.launchOpts, opts)
+	if len(p.accessByAttempt) >= len(p.launchOpts) {
+		return p.accessByAttempt[len(p.launchOpts)-1], nil
+	}
+	return AccessDetails{IPAddress: "1.2.3.4", Username: "ec2-user", PrivateKey: "PRIVATE"}, nil
+}
+
+func (p *restoreRetryProvider) Terminate(name string) error {
+	p.terminateCalls++
+	return nil
+}
+
+func (p *restoreRetryProvider) Running(name string) (bool, error) {
+	return false, nil
+}
+
+func (p *restoreRetryProvider) ListInstances(tags map[string]string) ([]InstanceSummary, error) {
+	return nil, nil
+}
+
+func (p *restoreRetryProvider) Username() string {
+	return "ec2-user"
+}
+
+func (p *restoreRetryProvider) SupportsRestore() bool {
+	return true
 }
 
 func TestPortsWithDefaultsDeduplicatesValues(t *testing.T) {
@@ -240,5 +276,45 @@ func TestSSHReadyDiagnosticIncludesRemoteDetails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "status: error") {
 		t.Fatalf("expected cloud-init details in error, got %v", err)
+	}
+}
+
+func TestLaunchAndWaitRetriesWithoutRestoreAfterSSHTimeout(t *testing.T) {
+	provider := &restoreRetryProvider{}
+	inst := NewInstance("my-app", CommonOptions{}, provider, nil)
+
+	originalWait := waitUntilInstanceSSHReady
+	defer func() { waitUntilInstanceSSHReady = originalWait }()
+
+	waitCalls := 0
+	waitUntilInstanceSSHReady = func(ctx context.Context, probe func() bool) bool {
+		waitCalls++
+		if waitCalls == 1 {
+			return false
+		}
+		return true
+	}
+
+	originalSSH := runSSHCombinedOutput
+	defer func() { runSSHCombinedOutput = originalSSH }()
+
+	runSSHCombinedOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		return []byte("ready-marker-missing"), errors.New("exit status 1")
+	}
+
+	if err := inst.LaunchAndWait(); err != nil {
+		t.Fatalf("LaunchAndWait() error: %v", err)
+	}
+	if len(provider.launchOpts) != 2 {
+		t.Fatalf("expected two launch attempts, got %d", len(provider.launchOpts))
+	}
+	if provider.launchOpts[0].SkipRestore {
+		t.Fatalf("did not expect first launch to skip restore")
+	}
+	if !provider.launchOpts[1].SkipRestore {
+		t.Fatalf("expected second launch to skip restore")
+	}
+	if provider.terminateCalls != 1 {
+		t.Fatalf("expected one terminate before retry, got %d", provider.terminateCalls)
 	}
 }

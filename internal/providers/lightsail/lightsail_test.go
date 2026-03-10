@@ -12,22 +12,22 @@ import (
 )
 
 type fakeLightsailClient struct {
-	instanceStateOutput               *ls.GetInstanceStateOutput
-	instanceStateByName               map[string]*ls.GetInstanceStateOutput
-	deleteInstanceCalls               int
-	createInstancesCalls              int
-	createInstancesInput              *ls.CreateInstancesInput
-	createInstancesFromSnapshotCalls  int
-	createInstancesFromSnapshotInput  *ls.CreateInstancesFromSnapshotInput
-	putInstancePublicPortsCalls       int
-	getInstanceAccessDetailsOutput    *ls.GetInstanceAccessDetailsOutput
-	getInstanceOutput                 *ls.GetInstanceOutput
-	getInstanceByName                 map[string]*types.Instance
-	getInstanceSnapshotsOutput        *ls.GetInstanceSnapshotsOutput
-	getInstancesOutput                *ls.GetInstancesOutput
-	getRegionsOutput                  *ls.GetRegionsOutput
-	getBlueprintsOutput               *ls.GetBlueprintsOutput
-	getBundlesOutput                  *ls.GetBundlesOutput
+	instanceStateOutput              *ls.GetInstanceStateOutput
+	instanceStateByName              map[string]*ls.GetInstanceStateOutput
+	deleteInstanceCalls              int
+	createInstancesCalls             int
+	createInstancesInput             *ls.CreateInstancesInput
+	createInstancesFromSnapshotCalls int
+	createInstancesFromSnapshotInput *ls.CreateInstancesFromSnapshotInput
+	putInstancePublicPortsCalls      int
+	getInstanceAccessDetailsOutput   *ls.GetInstanceAccessDetailsOutput
+	getInstanceOutput                *ls.GetInstanceOutput
+	getInstanceByName                map[string]*types.Instance
+	getInstanceSnapshotsOutput       *ls.GetInstanceSnapshotsOutput
+	getInstancesOutput               *ls.GetInstancesOutput
+	getRegionsOutput                 *ls.GetRegionsOutput
+	getBlueprintsOutput              *ls.GetBlueprintsOutput
+	getBundlesOutput                 *ls.GetBundlesOutput
 }
 
 func (f *fakeLightsailClient) GetInstanceState(ctx context.Context, input *ls.GetInstanceStateInput, optFns ...func(*ls.Options)) (*ls.GetInstanceStateOutput, error) {
@@ -332,6 +332,35 @@ func TestLaunchOrRestoreRestoresSnapshotForCompose(t *testing.T) {
 	}
 	if client.createInstancesCalls != 0 {
 		t.Fatalf("did not expect plain create instance call, got %d", client.createInstancesCalls)
+	}
+}
+
+func TestLaunchOrRestoreSkipsSnapshotWhenFreshCreateRetryRequested(t *testing.T) {
+	client := &fakeLightsailClient{
+		getInstanceSnapshotsOutput: &ls.GetInstanceSnapshotsOutput{
+			InstanceSnapshots: []types.InstanceSnapshot{
+				{
+					Name:             aws.String("snap-1"),
+					FromInstanceName: aws.String("demo"),
+					State:            types.InstanceSnapshotStateAvailable,
+				},
+			},
+		},
+	}
+	p := &Provider{client: client, ctx: context.Background(), region: DefaultRegion}
+
+	err := p.launchOrRestore("demo", pullpreview.LaunchOptions{
+		Tags:        map[string]string{"pullpreview_target": "compose"},
+		SkipRestore: true,
+	})
+	if err != nil {
+		t.Fatalf("launchOrRestore() error: %v", err)
+	}
+	if client.createInstancesCalls != 1 {
+		t.Fatalf("expected plain create for skip-restore launch, got %d", client.createInstancesCalls)
+	}
+	if client.createInstancesFromSnapshotCalls != 0 {
+		t.Fatalf("did not expect snapshot restore when skip_restore=true, got %d", client.createInstancesFromSnapshotCalls)
 	}
 }
 

@@ -50,6 +50,12 @@ var runSSHCombinedOutput = func(cmd *exec.Cmd) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+var waitUntilInstanceSSHReady = func(ctx context.Context, probe func() bool) bool {
+	return WaitUntilContext(ctx, pollAttemptsForWindow(instanceSSHReadyWaitWindow, instanceSSHReadyInterval), instanceSSHReadyInterval, probe)
+}
+
+var errInstanceSSHUnavailable = errors.New("can't connect to instance over SSH")
+
 type Instance struct {
 	Name             string
 	Subdomain        string
@@ -207,8 +213,37 @@ func (i *Instance) ValidateDeploymentConfig() error {
 }
 
 func (i *Instance) LaunchAndWait() error {
+	if err := i.launchAndWait(false); err == nil {
+		return nil
+	} else {
+		restoreProvider, ok := i.Provider.(SupportsRestore)
+		if !errors.Is(err, errInstanceSSHUnavailable) || !ok || !restoreProvider.SupportsRestore() {
+			return err
+		}
+		if i.Logger != nil {
+			i.Logger.Warnf(
+				"Instance name=%s never became SSH ready after %s. Terminating restored instance and retrying once with snapshot restore disabled.",
+				i.Name,
+				instanceSSHReadyWaitWindow,
+			)
+		}
+		if terminateErr := i.Terminate(); terminateErr != nil {
+			return fmt.Errorf("fresh-create retry failed to terminate %s: %w", i.Name, terminateErr)
+		}
+		if i.Logger != nil {
+			i.Logger.Infof("Retrying instance launch name=%s skip_restore=true", i.Name)
+		}
+		return i.launchAndWait(true)
+	}
+}
+
+func (i *Instance) launchAndWait(skipRestore bool) error {
+	createMessage := "Creating or restoring"
+	if skipRestore {
+		createMessage = "Creating fresh"
+	}
 	if i.Logger != nil {
-		i.Logger.Infof("Creating or restoring instance name=%s size=%s", i.Name, i.Size)
+		i.Logger.Infof("%s instance name=%s size=%s", createMessage, i.Name, i.Size)
 	}
 
 	userData := UserData{
@@ -229,11 +264,12 @@ func (i *Instance) LaunchAndWait() error {
 		userData = generatedUserData
 	}
 	access, err := i.Provider.Launch(i.Name, LaunchOptions{
-		Size:     i.Size,
-		UserData: userData,
-		Ports:    i.PortsWithDefaults(),
-		CIDRs:    i.CIDRs,
-		Tags:     i.Tags,
+		Size:        i.Size,
+		UserData:    userData,
+		Ports:       i.PortsWithDefaults(),
+		CIDRs:       i.CIDRs,
+		Tags:        i.Tags,
+		SkipRestore: skipRestore,
 	})
 	if err != nil {
 		return err
@@ -247,7 +283,7 @@ func (i *Instance) LaunchAndWait() error {
 			i.Username(),
 		)
 	}
-	if ok := WaitUntilContext(i.Context, pollAttemptsForWindow(instanceSSHReadyWaitWindow, instanceSSHReadyInterval), instanceSSHReadyInterval, func() bool {
+	if ok := waitUntilInstanceSSHReady(i.Context, func() bool {
 		if i.Logger != nil {
 			i.Logger.Infof(
 				"Waiting for SSH username=%s ip=%s ssh=\"ssh %s\"",
@@ -263,7 +299,7 @@ func (i *Instance) LaunchAndWait() error {
 				i.Logger.Warnf("SSH readiness diagnostics: %v", diagErr)
 			}
 		}
-		return errors.New("can't connect to instance over SSH")
+		return errInstanceSSHUnavailable
 	}
 	if i.Logger != nil {
 		i.Logger.Infof("Instance ssh access OK")
