@@ -1,6 +1,7 @@
 package pullpreview
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -212,5 +213,32 @@ func TestSetupSSHAccessAppendsAuthorizedKeys(t *testing.T) {
 	command := strings.Join(runner.args[0], " ")
 	if !strings.Contains(command, "cat - >>") {
 		t.Fatalf("expected SetupSSHAccess to append authorized_keys, command: %s", command)
+	}
+}
+
+func TestSSHReadyDiagnosticIncludesRemoteDetails(t *testing.T) {
+	inst := NewInstance("my-app", CommonOptions{}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "ec2-user", PrivateKey: "PRIVATE"}
+
+	original := runSSHCombinedOutput
+	defer func() { runSSHCombinedOutput = original }()
+
+	runSSHCombinedOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		args := strings.Join(cmd.Args, " ")
+		if !strings.Contains(args, "ready-marker-missing") {
+			t.Fatalf("expected SSH readiness diagnostic command, got %s", args)
+		}
+		return []byte("ready-marker-missing\n-- cloud-init status --\nstatus: error"), errors.New("exit status 1")
+	}
+
+	err := inst.SSHReadyDiagnostic()
+	if err == nil {
+		t.Fatalf("expected SSHReadyDiagnostic() error")
+	}
+	if !strings.Contains(err.Error(), "ready-marker-missing") {
+		t.Fatalf("expected ready marker context in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "status: error") {
+		t.Fatalf("expected cloud-init details in error, got %v", err)
 	}
 }
