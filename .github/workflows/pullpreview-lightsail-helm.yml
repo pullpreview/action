@@ -63,7 +63,7 @@ jobs:
             status_code="$(curl -fsSIL -o /dev/null -w '%{http_code}' --max-time 20 "${PREVIEW_URL}" || true)"
             body="$(curl -fsSL --max-time 20 "${PREVIEW_URL}" || true)"
             if [[ "${status_code}" == "200" ]] && \
-              printf '%s' "${body}" | grep -Eqi 'wp-content|wp-includes|User&#039;s Blog'; then
+              grep -Eqi 'wp-content|wp-includes|User&#039;s Blog' <<<"${body}"; then
               echo "Lightsail Helm smoke v1 checks passed for ${PREVIEW_URL}"
               exit 0
             fi
@@ -125,7 +125,7 @@ jobs:
             status_code="$(curl -fsSIL -o /dev/null -w '%{http_code}' --max-time 20 "${PREVIEW_URL}" || true)"
             body="$(curl -fsSL --max-time 20 "${PREVIEW_URL}" || true)"
             if [[ "${status_code}" == "200" ]] && \
-              printf '%s' "${body}" | grep -Eqi 'wp-content|wp-includes|User&#039;s Blog'; then
+              grep -Eqi 'wp-content|wp-includes|User&#039;s Blog' <<<"${body}"; then
               echo "Lightsail Helm smoke v2 checks passed for ${PREVIEW_URL}"
               exit 0
             fi

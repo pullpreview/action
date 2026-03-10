@@ -55,9 +55,9 @@ jobs:
           response=""
           for attempt in $(seq 1 60); do
             response="$(curl -fsSL --max-time 15 "${PREVIEW_URL}" || true)"
-            if printf '%s' "${response}" | grep -q 'Hello World Deploy 1' && \
-              printf '%s' "${response}" | grep -q 'seed_count=1' && \
-              printf '%s' "${response}" | grep -q 'seed_label=persisted'; then
+            if grep -q 'Hello World Deploy 1' <<<"${response}" && \
+              grep -q 'seed_count=1' <<<"${response}" && \
+              grep -q 'seed_label=persisted' <<<"${response}"; then
               echo "Smoke v1 checks passed for ${PREVIEW_URL}"
               exit 0
             fi
@@ -121,9 +121,9 @@ jobs:
           response=""
           for attempt in $(seq 1 60); do
             response="$(curl -fsSL --max-time 15 "${PREVIEW_URL}" || true)"
-            if printf '%s' "${response}" | grep -q 'Hello World Deploy 2' && \
-              printf '%s' "${response}" | grep -q 'seed_count=1' && \
-              printf '%s' "${response}" | grep -q 'seed_label=persisted'; then
+            if grep -q 'Hello World Deploy 2' <<<"${response}" && \
+              grep -q 'seed_count=1' <<<"${response}" && \
+              grep -q 'seed_label=persisted' <<<"${response}"; then
               echo "Smoke v2 checks passed for ${PREVIEW_URL}"
               exit 0
             fi
