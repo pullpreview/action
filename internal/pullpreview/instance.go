@@ -213,6 +213,22 @@ func (i *Instance) ValidateDeploymentConfig() error {
 }
 
 func (i *Instance) LaunchAndWait() error {
+	for attempt := 0; attempt < 2; attempt++ {
+		err := i.launchAndWait()
+		if !errors.Is(err, errInstanceSSHUnavailable) || attempt == 1 {
+			return err
+		}
+		if i.Logger != nil {
+			i.Logger.Warnf("Instance never reached ready state; terminating and retrying once name=%s", i.Name)
+		}
+		if err := i.Terminate(); err != nil {
+			return fmt.Errorf("instance not ready and terminate failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func (i *Instance) launchAndWait() error {
 	if i.Logger != nil {
 		i.Logger.Infof("Creating instance name=%s size=%s", i.Name, i.Size)
 	}
