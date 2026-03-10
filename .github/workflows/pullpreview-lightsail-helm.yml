@@ -57,18 +57,18 @@ jobs:
             exit 1
           fi
 
-          headers=""
+          status_code=""
           body=""
           for attempt in $(seq 1 60); do
-            headers="$(curl -fsSIL --max-time 20 "${PREVIEW_URL}" || true)"
+            status_code="$(curl -fsSIL -o /dev/null -w '%{http_code}' --max-time 20 "${PREVIEW_URL}" || true)"
             body="$(curl -fsSL --max-time 20 "${PREVIEW_URL}" || true)"
-            if printf '%s' "${headers}" | grep -q 'HTTP/2 200' && \
+            if [[ "${status_code}" == "200" ]] && \
               printf '%s' "${body}" | grep -Eqi 'wp-content|wp-includes|User&#039;s Blog'; then
               echo "Lightsail Helm smoke v1 checks passed for ${PREVIEW_URL}"
               exit 0
             fi
 
-            echo "Attempt ${attempt}/60: waiting for Lightsail Helm v1 response from ${PREVIEW_URL}"
+            echo "Attempt ${attempt}/60: waiting for Lightsail Helm v1 response from ${PREVIEW_URL} (http_status=${status_code:-n/a})"
             sleep 5
           done
 
@@ -119,18 +119,18 @@ jobs:
             exit 1
           fi
 
-          headers=""
+          status_code=""
           body=""
           for attempt in $(seq 1 60); do
-            headers="$(curl -fsSIL --max-time 20 "${PREVIEW_URL}" || true)"
+            status_code="$(curl -fsSIL -o /dev/null -w '%{http_code}' --max-time 20 "${PREVIEW_URL}" || true)"
             body="$(curl -fsSL --max-time 20 "${PREVIEW_URL}" || true)"
-            if printf '%s' "${headers}" | grep -q 'HTTP/2 200' && \
+            if [[ "${status_code}" == "200" ]] && \
               printf '%s' "${body}" | grep -Eqi 'wp-content|wp-includes|User&#039;s Blog'; then
               echo "Lightsail Helm smoke v2 checks passed for ${PREVIEW_URL}"
               exit 0
             fi
 
-            echo "Attempt ${attempt}/60: waiting for Lightsail Helm v2 response from ${PREVIEW_URL}"
+            echo "Attempt ${attempt}/60: waiting for Lightsail Helm v2 response from ${PREVIEW_URL} (http_status=${status_code:-n/a})"
             sleep 5
           done
 
