@@ -18,6 +18,20 @@ const (
 	remoteAppPath              = "/app"
 	instanceSSHReadyInterval   = 5 * time.Second
 	instanceSSHReadyWaitWindow = 5 * time.Minute
+	sshReadyDiagnosticCommand  = `if test -f /etc/pullpreview/ready; then
+  echo ready-marker-present
+  exit 0
+fi
+echo ready-marker-missing
+if command -v cloud-init >/dev/null 2>&1; then
+  echo "-- cloud-init status --"
+  sudo -n cloud-init status --long 2>/dev/null || cloud-init status --long 2>/dev/null || sudo -n cloud-init status 2>/dev/null || cloud-init status 2>/dev/null || true
+fi
+if sudo -n test -f /var/log/cloud-init-output.log 2>/dev/null || test -f /var/log/cloud-init-output.log; then
+  echo "-- cloud-init-output tail --"
+  sudo -n tail -n 40 /var/log/cloud-init-output.log 2>/dev/null || tail -n 40 /var/log/cloud-init-output.log 2>/dev/null || true
+fi
+exit 1`
 )
 
 type Runner interface {
@@ -30,6 +44,10 @@ func (r SystemRunner) Run(cmd *exec.Cmd) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+var runSSHCombinedOutput = func(cmd *exec.Cmd) ([]byte, error) {
+	return cmd.CombinedOutput()
 }
 
 type Instance struct {
@@ -240,6 +258,11 @@ func (i *Instance) LaunchAndWait() error {
 		}
 		return i.SSHReady()
 	}); !ok {
+		if i.Logger != nil {
+			if diagErr := i.SSHReadyDiagnostic(); diagErr != nil {
+				i.Logger.Warnf("SSH readiness diagnostics: %v", diagErr)
+			}
+		}
 		return errors.New("can't connect to instance over SSH")
 	}
 	if i.Logger != nil {
@@ -258,6 +281,18 @@ func (i *Instance) Running() (bool, error) {
 
 func (i *Instance) SSHReady() bool {
 	return i.SSH("test -f /etc/pullpreview/ready", nil) == nil
+}
+
+func (i *Instance) SSHReadyDiagnostic() error {
+	output, err := i.SSHOutput(sshReadyDiagnosticCommand, nil)
+	if err == nil {
+		return nil
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, output)
 }
 
 func (i *Instance) PublicIP() string {
@@ -449,7 +484,7 @@ func (i *Instance) SSHOutput(command string, input io.Reader) (string, error) {
 
 	cmd := exec.CommandContext(i.Context, "ssh", args...)
 	cmd.Stdin = input
-	output, err := cmd.CombinedOutput()
+	output, err := runSSHCombinedOutput(cmd)
 	return string(output), err
 }
 
