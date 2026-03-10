@@ -1,0 +1,135 @@
+name: pullpreview_openproject
+
+on:
+  schedule:
+    - cron: "45 5 * * *"
+  pull_request:
+    types: [labeled, unlabeled, synchronize, closed, reopened, opened]
+
+concurrency: ${{ github.ref }}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy_smoke_1:
+    runs-on: ubuntu-slim
+    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview-openproject' || contains(github.event.pull_request.labels.*.name, 'pullpreview-openproject')
+    outputs:
+      live: ${{ steps.pullpreview.outputs.live }}
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy OpenProject Helm smoke app (v1)
+        id: pullpreview
+        uses: "./"
+        with:
+          label: pullpreview-openproject
+          admins: "@collaborators/push"
+          app_path: .
+          provider: hetzner
+          region: ash
+          image: ubuntu-24.04
+          dns: rev2.click
+          instance_type: cpx21
+          max_domain_length: 40
+          deployment_target: helm
+          chart: openproject
+          chart_repository: https://charts.openproject.org
+          chart_set: 'develop=true,openproject.https=true,service.type=ClusterIP,openproject.host={{ pullpreview_public_dns }},resources.limits.cpu=2,persistence.accessModes[0]=ReadWriteOnce'
+          proxy_tls: '{{ release_name }}-openproject:8080'
+          ttl: 1h
+        env:
+          HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
+          HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"
+
+      - name: Assert deploy v1
+        if: steps.pullpreview.outputs.live == 'true'
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${PREVIEW_URL}" != https://* ]]; then
+            echo "::error::Expected https preview URL when proxy_tls is enabled, got ${PREVIEW_URL}"
+            exit 1
+          fi
+
+          body=""
+          for attempt in $(seq 1 90); do
+            body="$(curl -fsSL --max-time 30 "${PREVIEW_URL}" || true)"
+            if printf '%s' "${body}" | grep -Eqi 'OpenProject|Sign in'; then
+              echo "OpenProject smoke v1 checks passed for ${PREVIEW_URL}"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/90: waiting for OpenProject v1 response from ${PREVIEW_URL}"
+            sleep 10
+          done
+
+          echo "::error::Unexpected OpenProject response from ${PREVIEW_URL}"
+          printf '%s\n' "${body}"
+          exit 1
+
+  deploy_smoke_2:
+    runs-on: ubuntu-slim
+    needs: deploy_smoke_1
+    if: needs.deploy_smoke_1.result == 'success' && needs.deploy_smoke_1.outputs.live == 'true'
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Redeploy OpenProject Helm smoke app (v2)
+        id: pullpreview
+        uses: "./"
+        with:
+          label: pullpreview-openproject
+          admins: "@collaborators/push"
+          app_path: .
+          provider: hetzner
+          region: ash
+          image: ubuntu-24.04
+          dns: rev2.click
+          instance_type: cpx21
+          max_domain_length: 40
+          deployment_target: helm
+          chart: openproject
+          chart_repository: https://charts.openproject.org
+          chart_set: 'develop=true,openproject.https=true,service.type=ClusterIP,openproject.host={{ pullpreview_public_dns }},resources.limits.cpu=2,persistence.accessModes[0]=ReadWriteOnce'
+          proxy_tls: '{{ release_name }}-openproject:8080'
+          ttl: 1h
+        env:
+          HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
+          HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"
+
+      - name: Assert deploy v2
+        if: steps.pullpreview.outputs.live == 'true'
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.pullpreview.outputs.url }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${PREVIEW_URL}" != https://* ]]; then
+            echo "::error::Expected https preview URL when proxy_tls is enabled, got ${PREVIEW_URL}"
+            exit 1
+          fi
+
+          body=""
+          for attempt in $(seq 1 90); do
+            body="$(curl -fsSL --max-time 30 "${PREVIEW_URL}" || true)"
+            if printf '%s' "${body}" | grep -Eqi 'OpenProject|Sign in'; then
+              echo "OpenProject smoke v2 checks passed for ${PREVIEW_URL}"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/90: waiting for OpenProject v2 response from ${PREVIEW_URL}"
+            sleep 10
+          done
+
+          echo "::error::Unexpected OpenProject response from ${PREVIEW_URL}"
+          printf '%s\n' "${body}"
+          exit 1
