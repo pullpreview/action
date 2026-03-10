@@ -54,7 +54,9 @@ func TestBuildBootstrapScriptComposeOnAmazonLinuxUsesNativeDockerPackage(t *test
 	}
 
 	checks := []string{
-		"dnf -y install dnf-plugins-core curl",
+		"dnf -y install ca-certificates dnf-plugins-core",
+		"if ! command -v curl >/dev/null 2>&1; then",
+		"dnf -y install curl-minimal || dnf -y install curl",
 		"if echo \"$IMAGE_NAME\" | grep -Eiq 'amazon[- ]linux'; then",
 		"yum -y install docker",
 		"https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${compose_arch}",
