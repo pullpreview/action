@@ -132,13 +132,10 @@ func (p *Provider) Terminate(name string) error {
 	if err != nil {
 		return err
 	}
-	if len(resp.Operations) == 0 {
-		return nil
-	}
-	if resp.Operations[0].ErrorCode != nil {
+	if len(resp.Operations) > 0 && resp.Operations[0].ErrorCode != nil {
 		return errors.New(*resp.Operations[0].ErrorCode)
 	}
-	return nil
+	return p.waitUntilDeleted(name)
 }
 
 func (p *Provider) Launch(name string, opts pullpreview.LaunchOptions) (pullpreview.AccessDetails, error) {
@@ -207,12 +204,30 @@ func (p *Provider) launchOrRestore(name string, opts pullpreview.LaunchOptions) 
 	}
 
 	snapshot := p.latestSnapshot(name)
-	if strings.EqualFold(strings.TrimSpace(opts.Tags["pullpreview_target"]), string(pullpreview.DeploymentTargetHelm)) {
+	switch {
+	case opts.SkipRestore:
+		if p.logger != nil {
+			p.logger.Infof("Skipping snapshot restore for %q: fresh-create retry requested", name)
+		}
+		snapshot = nil
+	case strings.EqualFold(strings.TrimSpace(opts.Tags["pullpreview_target"]), string(pullpreview.DeploymentTargetHelm)):
+		if p.logger != nil {
+			p.logger.Infof("Skipping snapshot restore for %q: deployment_target=helm", name)
+		}
 		snapshot = nil
 	}
 	if snapshot != nil {
 		if p.logger != nil {
-			p.logger.Infof("Found snapshot to restore from: %s", aws.ToString(snapshot.Name))
+			createdAt := "unknown"
+			if snapshot.CreatedAt != nil {
+				createdAt = snapshot.CreatedAt.UTC().Format(time.RFC3339)
+			}
+			p.logger.Infof(
+				"Restoring Lightsail snapshot name=%s created_at=%s from_instance=%s",
+				aws.ToString(snapshot.Name),
+				createdAt,
+				aws.ToString(snapshot.FromInstanceName),
+			)
 		}
 		_, err := p.client.CreateInstancesFromSnapshot(p.ctx, &ls.CreateInstancesFromSnapshotInput{
 			InstanceNames:        []string{name},
@@ -223,6 +238,9 @@ func (p *Provider) launchOrRestore(name string, opts pullpreview.LaunchOptions) 
 			InstanceSnapshotName: snapshot.Name,
 		})
 		return err
+	}
+	if p.logger != nil {
+		p.logger.Infof("Creating fresh Lightsail instance name=%s", name)
 	}
 
 	_, err = p.client.CreateInstances(p.ctx, params)

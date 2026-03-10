@@ -60,11 +60,12 @@ type UserDataOptions struct {
 }
 
 type LaunchOptions struct {
-	Size     string
-	UserData string
-	Ports    []string
-	CIDRs    []string
-	Tags     map[string]string
+	Size        string
+	UserData    string
+	Ports       []string
+	CIDRs       []string
+	Tags        map[string]string
+	SkipRestore bool
 }
 
 type InstanceSummary struct {
