@@ -8,7 +8,14 @@ on:
 jobs:
   deploy_env1:
     runs-on: ubuntu-slim
-    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview-multi-env' || contains(github.event.pull_request.labels.*.name, 'pullpreview-multi-env')
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.label.name == 'pullpreview-multi-env' ||
+      ((github.event.action == 'opened' ||
+        github.event.action == 'reopened' ||
+        github.event.action == 'synchronize' ||
+        github.event.action == 'closed') &&
+       contains(github.event.pull_request.labels.*.name, 'pullpreview-multi-env'))
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -26,7 +33,14 @@ jobs:
 
   deploy_env2:
     runs-on: ubuntu-slim
-    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview-multi-env' || contains(github.event.pull_request.labels.*.name, 'pullpreview-multi-env')
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.label.name == 'pullpreview-multi-env' ||
+      ((github.event.action == 'opened' ||
+        github.event.action == 'reopened' ||
+        github.event.action == 'synchronize' ||
+        github.event.action == 'closed') &&
+       contains(github.event.pull_request.labels.*.name, 'pullpreview-multi-env'))
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
