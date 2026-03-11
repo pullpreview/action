@@ -15,7 +15,14 @@ permissions:
 jobs:
   deploy_smoke_1:
     runs-on: ubuntu-slim
-    if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview-openproject' || contains(github.event.pull_request.labels.*.name, 'pullpreview-openproject')
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.label.name == 'pullpreview-openproject' ||
+      ((github.event.action == 'opened' ||
+        github.event.action == 'reopened' ||
+        github.event.action == 'synchronize' ||
+        github.event.action == 'closed') &&
+       contains(github.event.pull_request.labels.*.name, 'pullpreview-openproject'))
     outputs:
       live: ${{ steps.pullpreview.outputs.live }}
     timeout-minutes: 55

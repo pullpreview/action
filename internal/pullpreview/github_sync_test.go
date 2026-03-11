@@ -249,6 +249,47 @@ func TestSyncLabeledFixtureRunsUp(t *testing.T) {
 	}
 }
 
+func TestSyncLogsIgnoredLabeledEventDetailsForDifferentConfiguredLabel(t *testing.T) {
+	t.Setenv("PULLPREVIEW_TEST", "1")
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	event.Label = &GitHubLabel{Name: "pullpreview-helm"}
+	event.PullRequest.Labels = []GitHubLabel{
+		{Name: "pullpreview"},
+		{Name: "pullpreview-helm"},
+	}
+
+	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
+	sync := newSync(event, GithubSyncOptions{Label: "pullpreview", Common: CommonOptions{}}, client, fakeProvider{running: true})
+	var logs bytes.Buffer
+	logger := NewLogger(LevelInfo)
+	logger.base = log.New(&logs, "", 0)
+	sync.logger = logger
+
+	upCalled := false
+	sync.runUp = func(opts UpOptions, provider Provider, logger *Logger) (*Instance, error) {
+		upCalled = true
+		return nil, nil
+	}
+
+	if err := sync.Sync(); err != nil {
+		t.Fatalf("Sync() returned error: %v", err)
+	}
+	if upCalled {
+		t.Fatalf("expected runUp not to be called")
+	}
+
+	logOutput := logs.String()
+	if !strings.Contains(logOutput, `event_label="pullpreview-helm"`) {
+		t.Fatalf("expected event label details in logs: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `configured_label="pullpreview"`) {
+		t.Fatalf("expected configured label details in logs: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `reason="event label does not match configured label"`) {
+		t.Fatalf("expected ignored-event reason in logs: %s", logOutput)
+	}
+}
+
 func TestSyncLabeledProxyTLSUsesHTTPSURLInComment(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	t.Setenv("GITHUB_SERVER_URL", "https://github.com")

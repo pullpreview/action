@@ -463,7 +463,7 @@ func (g *GithubSync) Sync() error {
 	action := g.guessAction()
 	if action == actionIgnored {
 		if g.logger != nil {
-			g.logger.Infof("Ignoring event %s", action)
+			g.logger.Infof("Ignoring event %s", g.ignoredEventDetails())
 		}
 		return nil
 	}
@@ -1028,6 +1028,46 @@ func (g *GithubSync) prHasLabel(searchedLabel string) bool {
 		}
 	}
 	return false
+}
+
+func (g *GithubSync) prLabels() []string {
+	if g.pr() == nil {
+		return nil
+	}
+	labels := make([]string, 0, len(g.pr().Labels))
+	for _, label := range g.pr().Labels {
+		if label.Name == "" {
+			continue
+		}
+		labels = append(labels, label.Name)
+	}
+	return labels
+}
+
+func (g *GithubSync) ignoredEventDetails() string {
+	parts := []string{fmt.Sprintf("action=%q", g.event.Action)}
+	if prNumber := g.prNumber(); prNumber != 0 {
+		parts = append(parts, fmt.Sprintf("pr=%d", prNumber))
+	}
+	if g.event.Label != nil && g.event.Label.Name != "" {
+		parts = append(parts, fmt.Sprintf("event_label=%q", g.event.Label.Name))
+	}
+	if g.opts.Label != "" {
+		parts = append(parts, fmt.Sprintf("configured_label=%q", g.opts.Label))
+	}
+	if labels := g.prLabels(); len(labels) > 0 {
+		parts = append(parts, fmt.Sprintf("pr_labels=%q", strings.Join(labels, ",")))
+	}
+
+	reason := "no matching action for event"
+	switch {
+	case g.pullRequest() && (g.event.Action == "labeled" || g.event.Action == "unlabeled") && g.event.Label != nil && !strings.EqualFold(g.event.Label.Name, g.opts.Label):
+		reason = "event label does not match configured label"
+	case (g.push() || g.prSynchronize()) && !g.prHasLabel(""):
+		reason = "configured label is not present on the PR"
+	}
+	parts = append(parts, fmt.Sprintf("reason=%q", reason))
+	return strings.Join(parts, " ")
 }
 
 func (g *GithubSync) prNumber() int {
