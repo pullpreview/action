@@ -18,7 +18,7 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'pullpreview-multi-env'))
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: "./"
         with:
           deployment_variant: env1
@@ -43,7 +43,7 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'pullpreview-multi-env'))
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: "./"
         with:
           deployment_variant: env2
