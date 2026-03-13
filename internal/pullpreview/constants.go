@@ -1,6 +1,6 @@
 package pullpreview
 
 const (
-	Version   = "1.0.0"
+	Version   = "6.2.0"
 	StackName = "pullpreview"
 )
