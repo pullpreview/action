@@ -94,12 +94,35 @@ Preview environments that:
 ## Installation & Usage
 
 - [Getting Started](https://github.com/pullpreview/action/wiki/Getting-Started)
+- [Deployment Targets](https://github.com/pullpreview/action/wiki/Deployment-Targets)
 - Action [Inputs](https://github.com/pullpreview/action/wiki/Inputs) / [Outputs](https://github.com/pullpreview/action/wiki/Outputs)
 - Handling [Seed Data](https://github.com/pullpreview/action/wiki/Seed-Data)
 - [Workflow Examples](https://github.com/pullpreview/action/wiki/Workflow-Examples)
 - [FAQ](https://github.com/pullpreview/action/wiki/FAQ)
 
 &rarr; Please see the [wiki](https://github.com/pullpreview/action/wiki) for the full documentation.
+
+## Deployment Targets
+
+PullPreview supports two deployment targets:
+
+- `compose`: deploy your app with Docker Compose on the preview instance
+- `helm`: bootstrap k3s on the preview instance and deploy a Helm chart
+
+At a glance:
+
+| Target | Best when | Main inputs | HTTPS |
+| --- | --- | --- | --- |
+| `compose` | Your app already runs with `docker compose up` | `compose_files`, `compose_options`, `registries`, `pre_script`, optional `proxy_tls` | optional |
+| `helm` | Your app is packaged as a Helm chart | `chart`, `chart_repository`, `chart_values`, `chart_set`, `proxy_tls`, optional `pre_script` | required |
+
+Notes:
+
+- `compose` is the default deployment target.
+- `helm` requires both `chart` and `proxy_tls`.
+- `helm` does not support `registries`.
+- `helm` does not support customized `compose_files` or `compose_options`.
+- Both providers, `lightsail` and `hetzner`, support both deployment targets.
 
 ## Action Inputs (v6)
 
@@ -130,8 +153,8 @@ All supported `with:` inputs from `action.yml`:
 | `deployment_variant` | `""` | Optional short suffix to run multiple preview environments per PR (max 4 chars). |
 | `provider` | `lightsail` | Cloud provider (`lightsail`, `hetzner`). |
 | `registries` | `""` | Private registry credentials for Compose deployments, e.g. `docker://user:password@ghcr.io`. |
-| `proxy_tls` | `""` | Automatic HTTPS forwarding with Caddy + Let's Encrypt (`service:port`, e.g. `web:80`). |
-| `pre_script` | `""` | Path to a local shell script (relative to `app_path`) executed inline over SSH before compose deploy (should be self-contained). |
+| `proxy_tls` | `""` | Automatic HTTPS forwarding with Caddy + Let's Encrypt. For Compose, this points to `service:port`; for Helm, it points to the Kubernetes Service and port. |
+| `pre_script` | `""` | Path to a local shell script (relative to `app_path`) executed inline over SSH before deployment. Works with both `compose` and `helm`. |
 | `ttl` | `infinite` | Maximum deployment lifetime (e.g. `10h`, `5d`, `infinite`). |
 
 Notes:
@@ -141,6 +164,7 @@ Notes:
 - For `deployment_target: helm`, use either a local chart path (`./charts/my-app`), a repo chart name plus `chart_repository` (`chart: wordpress` with `chart_repository: https://charts.bitnami.com/bitnami`), or an OCI reference (`oci://...`).
 - For `deployment_target: helm`, PullPreview bootstraps k3s on the preview instance, deploys the chart as a single Helm release in a dedicated namespace, and exposes one HTTPS preview URL through a PullPreview-managed Caddy Deployment.
 - For `deployment_target: helm`, `registries` is not supported yet; use public images or chart-managed pull secrets instead.
+- For `deployment_target: helm`, customized `compose_files` and `compose_options` are not supported.
 - `admins: "@collaborators/push"` uses GitHub API collaborators with push permission (first page, up to 100 users; warning is logged if more exist).
 - SSH key fetches are cached between runs in the action cache.
 - For Lightsail, configure `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Lightsail previews support fresh deploys and same-instance redeploys.
@@ -165,17 +189,20 @@ All supported outputs from `action.yml`:
 | --- | --- |
 | `live` | `true` when the current run produced or updated a live preview deployment, otherwise `false`. |
 | `url` | Public preview URL reported in PR comments and step outputs. With `proxy_tls`, this is an HTTPS URL on port `443`. |
-| `host` | Preview instance hostname or IP address. |
+| `host` | Preview instance public IP address. |
 | `username` | SSH username for the preview instance. |
 
 Notes:
 
 - On non-deploying events, such as unrelated PR activity without the configured label, `live` is `false` and the other outputs are omitted.
+- `host` remains the instance IP even when `url` uses a generated DNS name.
 - For `deployment_target: helm`, outputs keep the same shape as `compose`: one preview URL, one host, and one SSH username per preview instance.
 
-## Example
+## Examples
 
-Workflow file for pullpreview-driven deployments:
+### Compose example
+
+Workflow file for standard Compose-based previews:
 
 ```yaml
 # .github/workflows/pullpreview.yml
@@ -193,9 +220,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: pullpreview/action@v6
         with:
+          deployment_target: compose
           # Those GitHub users will have SSH access to the servers
           admins: crohr,other-github-user
           # Use the cidrs option to restrict access to the live environments to specific IP ranges
@@ -216,7 +244,48 @@ jobs:
           AWS_REGION: "us-east-1"
 ```
 
-## Hetzner example
+### Helm example using WordPress
+
+This example deploys the Bitnami WordPress chart as a preview environment on Lightsail:
+
+```yaml
+# .github/workflows/pullpreview-helm.yml
+name: PullPreview Helm
+on:
+  pull_request:
+    types: [labeled, unlabeled, synchronize, closed, reopened, opened]
+
+jobs:
+  deploy_helm:
+    runs-on: ubuntu-slim
+    if: github.event.label.name == 'pullpreview-helm' || contains(github.event.pull_request.labels.*.name, 'pullpreview-helm')
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pullpreview/action@v6
+        with:
+          label: pullpreview-helm
+          provider: lightsail
+          region: us-east-1
+          deployment_target: helm
+          chart: wordpress
+          chart_repository: https://charts.bitnami.com/bitnami
+          chart_set: service.type=ClusterIP,mariadb.primary.service.type=ClusterIP
+          proxy_tls: "{{ release_name }}-wordpress:80"
+          instance_type: medium
+          dns: rev3.click
+        env:
+          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+```
+
+Notes:
+
+- `proxy_tls` is required for Helm previews.
+- `chart_repository` is required here because `chart: wordpress` is a repository chart name.
+- `service.type=ClusterIP` keeps WordPress behind the PullPreview-managed Caddy gateway.
+
+### Hetzner Compose example
 
 ```yaml
 # .github/workflows/pullpreview-hetzner.yml
@@ -233,7 +302,7 @@ jobs:
     if: github.event_name == 'schedule' || github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: pullpreview/action@v6
         with:
           admins: "@collaborators/push"
@@ -254,7 +323,7 @@ jobs:
 
 ```
 
-## Hetzner Helm example
+### Hetzner Helm example
 
 ```yaml
 # .github/workflows/pullpreview-hetzner-helm.yml
@@ -269,7 +338,7 @@ jobs:
     if: github.event.label.name == 'pullpreview' || contains(github.event.pull_request.labels.*.name, 'pullpreview')
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: pullpreview/action@v6
         with:
           provider: hetzner
@@ -284,39 +353,6 @@ jobs:
         env:
           HCLOUD_TOKEN: "${{ secrets.HCLOUD_TOKEN }}"
           HETZNER_CA_KEY: "${{ secrets.HETZNER_CA_KEY }}"
-```
-
-## Lightsail Helm example
-
-```yaml
-# .github/workflows/pullpreview-lightsail-helm.yml
-name: PullPreview Lightsail Helm
-on:
-  pull_request:
-    types: [labeled, unlabeled, synchronize, closed, reopened, opened]
-
-jobs:
-  deploy_lightsail_helm:
-    runs-on: ubuntu-slim
-    if: github.event.label.name == 'pullpreview-lightsail-helm' || contains(github.event.pull_request.labels.*.name, 'pullpreview-lightsail-helm')
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pullpreview/action@v6
-        with:
-          label: pullpreview-lightsail-helm
-          provider: lightsail
-          region: us-east-1
-          deployment_target: helm
-          chart: wordpress
-          chart_repository: https://charts.bitnami.com/bitnami
-          chart_set: service.type=ClusterIP
-          proxy_tls: "{{ release_name }}-wordpress:80"
-          instance_type: medium
-          dns: rev3.click
-        env:
-          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
 ```
 
 ## CLI usage (installed binary)
