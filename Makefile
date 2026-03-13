@@ -17,7 +17,7 @@ DIST_BINARIES := \
 
 .NOTPARALLEL: bump dist tag release
 
-.PHONY: bump bump-check clean-dist dist dist-check dist-commit release rewrite tag tag-check test version-check
+.PHONY: bump bump-check check-submodule-refs clean-dist dist dist-check dist-commit release rewrite tag tag-check test version-check
 
 dist: dist-check clean-dist $(DIST_BINARIES) dist-commit
 
@@ -146,5 +146,9 @@ rewrite:
 	git branch -D "$$tmp_branch" >/dev/null; \
 	echo "Rewrite complete. Force-push with: git push --force-with-lease origin $$current_branch"
 
+check-submodule-refs:
+	./test/check-submodule-refs.sh
+
 test:
+	$(MAKE) check-submodule-refs
 	$(GO_TEST)
