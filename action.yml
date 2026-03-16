@@ -97,6 +97,10 @@ inputs:
     description: "Enable automatic HTTPS forwarding with Let's Encrypt (format: service:port, e.g. web:80)"
     required: false
     default: ""
+  proxy_tls_hosts:
+    description: "Additional public hostnames served by the Helm Caddy gateway, comma-separated"
+    required: false
+    default: ""
   pre_script:
     description: "Path to a local bash script (relative to app_path) executed inline over SSH on the instance before docker compose"
     required: false
@@ -196,6 +200,7 @@ runs:
           --deployment-variant "${{ inputs.deployment_variant }}" \
           --registries "${{ inputs.registries }}" \
           --proxy-tls "${{ inputs.proxy_tls }}" \
+          --proxy-tls-hosts "${{ inputs.proxy_tls_hosts }}" \
           --pre-script "${{ inputs.pre_script }}" \
           --ttl "${{ inputs.ttl }}" \
           --templated-url "${{ inputs.templated_url }}"

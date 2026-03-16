@@ -194,6 +194,7 @@ type commonFlagValues struct {
 	chartRepository string
 	chartValues     string
 	chartSet        string
+	proxyTLSHosts   string
 	tags            multiValue
 	options         pullpreview.CommonOptions
 }
@@ -208,6 +209,7 @@ func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 	fs.StringVar(&values.registries, "registries", "", "URIs of docker registries to authenticate against")
 	fs.StringVar((*string)(&values.options.DeploymentTarget), "deployment-target", string(pullpreview.DeploymentTargetCompose), "Deployment target to use: compose or helm")
 	fs.StringVar(&values.options.ProxyTLS, "proxy-tls", "", "Enable automatic HTTPS proxying with Let's Encrypt (format: service:port, e.g. web:80)")
+	fs.StringVar(&values.proxyTLSHosts, "proxy-tls-hosts", "", "Additional public hostnames served by the Helm proxy, comma-separated")
 	fs.StringVar(&values.options.DNS, "dns", "my.preview.run", "DNS suffix to use")
 	fs.StringVar(&values.ports, "ports", "80/tcp,443/tcp", "Ports to open for external access")
 	fs.StringVar(&values.options.InstanceType, "instance-type", "small", "Instance type to use")
@@ -240,6 +242,7 @@ func (c *commonFlagValues) ToOptions(ctx context.Context) pullpreview.CommonOpti
 	opts.ChartRepository = strings.TrimSpace(c.chartRepository)
 	opts.ChartValues = splitCommaList(c.chartValues)
 	opts.ChartSet = splitCommaList(c.chartSet)
+	opts.ProxyTLSHosts = splitCommaList(c.proxyTLSHosts)
 	opts.Tags = parseTags(c.tags)
 	return opts
 }

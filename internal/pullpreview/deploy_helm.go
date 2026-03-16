@@ -8,19 +8,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
 	helmReleaseName             = "app"
 	helmFailureReportOutputSize = 12000
+	helmDeployTimeout           = "15m"
 )
 
 type helmChartSource struct {
 	ChartRef     string
 	LocalChart   string
 	RepoURL      string
+	RepoDefs     []helmRepoDefinition
 	RequiresSync bool
 	SyncAppTree  bool
+}
+
+type helmRepoDefinition struct {
+	Name string
+	URL  string
 }
 
 func (i *Instance) HelmNamespace() string {
@@ -116,6 +125,7 @@ func (i *Instance) resolveHelmChartSource(appPath string) (helmChartSource, erro
 		return helmChartSource{
 			ChartRef: fmt.Sprintf("pullpreview/%s", strings.TrimLeft(chart, "/")),
 			RepoURL:  repoURL,
+			RepoDefs: []helmRepoDefinition{{Name: "pullpreview", URL: repoURL}},
 		}, nil
 	}
 
@@ -131,6 +141,10 @@ func (i *Instance) resolveHelmChartSource(appPath string) (helmChartSource, erro
 	if _, err := os.Stat(localChart); err != nil {
 		return helmChartSource{}, fmt.Errorf("unable to access chart %s: %w", chart, err)
 	}
+	repoDefs, err := helmDependencyRepos(localChart)
+	if err != nil {
+		return helmChartSource{}, fmt.Errorf("chart %s: %w", chart, err)
+	}
 	if pathWithinRoot(absAppPath, localChart) {
 		remoteChart, err := remoteBindSource(localChart, absAppPath, remoteAppPath)
 		if err != nil {
@@ -139,6 +153,7 @@ func (i *Instance) resolveHelmChartSource(appPath string) (helmChartSource, erro
 		return helmChartSource{
 			ChartRef:     remoteChart,
 			LocalChart:   localChart,
+			RepoDefs:     repoDefs,
 			RequiresSync: true,
 			SyncAppTree:  true,
 		}, nil
@@ -146,8 +161,88 @@ func (i *Instance) resolveHelmChartSource(appPath string) (helmChartSource, erro
 	return helmChartSource{
 		ChartRef:     externalHelmChartPath(localChart),
 		LocalChart:   localChart,
+		RepoDefs:     repoDefs,
 		RequiresSync: true,
 	}, nil
+}
+
+type localHelmChartMetadata struct {
+	Dependencies []localHelmChartDependency `yaml:"dependencies"`
+}
+
+type localHelmChartDependency struct {
+	Name       string `yaml:"name"`
+	Repository string `yaml:"repository"`
+}
+
+func helmDependencyRepos(chartPath string) ([]helmRepoDefinition, error) {
+	chartYAMLPath := filepath.Join(chartPath, "Chart.yaml")
+	data, err := os.ReadFile(chartYAMLPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", chartYAMLPath, err)
+	}
+
+	var metadata localHelmChartMetadata
+	if err := yaml.Unmarshal(data, &metadata); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", chartYAMLPath, err)
+	}
+
+	repos := []helmRepoDefinition{}
+	urlToName := map[string]string{}
+	usedNames := map[string]bool{}
+	for _, dep := range metadata.Dependencies {
+		repoURL := strings.TrimSpace(dep.Repository)
+		if !strings.HasPrefix(repoURL, "http://") && !strings.HasPrefix(repoURL, "https://") {
+			continue
+		}
+		if existing, ok := urlToName[repoURL]; ok {
+			repos = append(repos, helmRepoDefinition{Name: existing, URL: repoURL})
+			continue
+		}
+		name := uniqueHelmRepoName(dep.Name, repoURL, usedNames)
+		urlToName[repoURL] = name
+		usedNames[name] = true
+		repos = append(repos, helmRepoDefinition{Name: name, URL: repoURL})
+	}
+	return uniqueHelmRepoDefinitions(repos), nil
+}
+
+func uniqueHelmRepoName(preferred, repoURL string, used map[string]bool) string {
+	candidate := sanitizeRemotePathComponent(preferred)
+	if candidate == "" || candidate == "chart" {
+		candidate = sanitizeRemotePathComponent(repoURL)
+	}
+	if candidate == "" || candidate == "chart" {
+		candidate = "repo"
+	}
+	if !used[candidate] {
+		return candidate
+	}
+	sum := fmt.Sprintf("%x", sha1.Sum([]byte(repoURL)))
+	for idx := 0; ; idx++ {
+		suffix := sum[:6]
+		if idx > 0 {
+			suffix = fmt.Sprintf("%s-%d", suffix, idx)
+		}
+		name := fmt.Sprintf("%s-%s", candidate, suffix)
+		if !used[name] {
+			return name
+		}
+	}
+}
+
+func uniqueHelmRepoDefinitions(values []helmRepoDefinition) []helmRepoDefinition {
+	seen := map[string]bool{}
+	result := make([]helmRepoDefinition, 0, len(values))
+	for _, value := range values {
+		key := value.Name + "\x00" + value.URL
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 func pathWithinRoot(root, candidate string) bool {
@@ -321,11 +416,23 @@ func (i *Instance) runHelmDeployment(source helmChartSource, valueArgs []string)
 		"export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",
 		fmt.Sprintf("kubectl create namespace %s --dry-run=client -o yaml | kubectl apply -f - >/dev/null", shellQuote(namespace)),
 	}
-	if source.RepoURL != "" {
-		lines = append(lines,
-			fmt.Sprintf("helm repo add pullpreview %s --force-update >/dev/null", shellQuote(source.RepoURL)),
-			"helm repo update pullpreview >/dev/null",
-		)
+	manifest := i.renderHelmCaddyManifest(namespace, upstreamHost, target.Port)
+	lines = append(lines,
+		"cat <<'EOF' >/tmp/pullpreview-caddy.yaml",
+		manifest,
+		"EOF",
+		"kubectl apply -f /tmp/pullpreview-caddy.yaml >/dev/null",
+		fmt.Sprintf("kubectl rollout status deployment/pullpreview-caddy -n %s --timeout=10m", shellQuote(namespace)),
+	)
+	repoDefs := source.RepoDefs
+	if len(repoDefs) == 0 && strings.TrimSpace(source.RepoURL) != "" {
+		repoDefs = []helmRepoDefinition{{Name: "pullpreview", URL: source.RepoURL}}
+	}
+	if len(repoDefs) > 0 {
+		for _, repo := range repoDefs {
+			lines = append(lines, fmt.Sprintf("helm repo add %s %s --force-update >/dev/null", shellQuote(repo.Name), shellQuote(repo.URL)))
+		}
+		lines = append(lines, "helm repo update >/dev/null")
 	}
 	if source.LocalChart != "" {
 		lines = append(lines, fmt.Sprintf("helm dependency build %s >/dev/null", shellQuote(source.ChartRef)))
@@ -337,18 +444,10 @@ func (i *Instance) runHelmDeployment(source helmChartSource, valueArgs []string)
 		"--create-namespace",
 		"--wait",
 		"--atomic",
+		"--timeout", helmDeployTimeout,
 	}
 	helmArgs = append(helmArgs, valueArgs...)
 	lines = append(lines, shellJoin(helmArgs...))
-
-	manifest := i.renderHelmCaddyManifest(namespace, upstreamHost, target.Port)
-	lines = append(lines,
-		"cat <<'EOF' >/tmp/pullpreview-caddy.yaml",
-		manifest,
-		"EOF",
-		"kubectl apply -f /tmp/pullpreview-caddy.yaml >/dev/null",
-		fmt.Sprintf("kubectl rollout status deployment/pullpreview-caddy -n %s --timeout=10m", shellQuote(namespace)),
-	)
 
 	if i.Logger != nil {
 		i.Logger.Infof("Deploying Helm release=%s namespace=%s chart=%s", helmReleaseName, namespace, source.ChartRef)
@@ -364,7 +463,23 @@ func shellJoin(args ...string) string {
 	return strings.Join(quoted, " ")
 }
 
+func (i *Instance) helmProxyTLSPublicHosts() []string {
+	hosts := []string{i.PublicDNS()}
+	for _, raw := range i.ProxyTLSHosts {
+		hosts = append(hosts, i.expandDeploymentValue(raw))
+	}
+	return uniqueStrings(hosts)
+}
+
 func (i *Instance) renderHelmCaddyManifest(namespace, upstreamHost string, upstreamPort int) string {
+	var caddySites strings.Builder
+	for _, host := range i.helmProxyTLSPublicHosts() {
+		caddySites.WriteString(fmt.Sprintf(`    %s {
+      reverse_proxy %s:%d
+    }
+`, host, upstreamHost, upstreamPort))
+	}
+
 	return fmt.Sprintf(`apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -372,9 +487,7 @@ metadata:
   namespace: %s
 data:
   Caddyfile: |
-    %s {
-      reverse_proxy %s:%d
-    }
+%s
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -433,7 +546,7 @@ spec:
           hostPath:
             path: /var/lib/pullpreview/caddy-config
             type: DirectoryOrCreate
-`, namespace, i.PublicDNS(), upstreamHost, upstreamPort, namespace)
+`, namespace, caddySites.String(), namespace)
 }
 
 func (i *Instance) emitHelmFailureReport() {

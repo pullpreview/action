@@ -68,6 +68,7 @@ func TestRegisterCommonFlagsParsesHelmOptions(t *testing.T) {
 		"--chart-repository", "https://charts.bitnami.com/bitnami",
 		"--chart-values", "values.yaml,values.preview.yaml",
 		"--chart-set", "image.tag=123,ingress.host={{ release_name }}.preview.run",
+		"--proxy-tls-hosts", "nextcloud.{{ pullpreview_public_dns }},keycloak.{{ pullpreview_public_dns }}",
 	}); err != nil {
 		t.Fatalf("Parse() error: %v", err)
 	}
@@ -90,6 +91,9 @@ func TestRegisterCommonFlagsParsesHelmOptions(t *testing.T) {
 	}
 	if len(opts.ChartSet) != 2 {
 		t.Fatalf("unexpected chart set values: %#v", opts.ChartSet)
+	}
+	if len(opts.ProxyTLSHosts) != 2 {
+		t.Fatalf("unexpected proxy tls hosts: %#v", opts.ProxyTLSHosts)
 	}
 }
 

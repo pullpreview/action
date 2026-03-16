@@ -113,6 +113,15 @@ func TestValidateDeploymentConfigRejectsComposeWithHelmOptions(t *testing.T) {
 	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "require deployment_target=helm") {
 		t.Fatalf("expected compose/helm validation error, got %v", err)
 	}
+
+	inst = NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetCompose,
+		ProxyTLSHosts:    []string{"nextcloud.example.test"},
+	}, fakeProvider{}, nil)
+
+	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "proxy_tls_hosts") {
+		t.Fatalf("expected proxy_tls_hosts validation error, got %v", err)
+	}
 }
 
 func TestValidateDeploymentConfigAcceptsHelmForLightsailProvider(t *testing.T) {
@@ -170,7 +179,11 @@ func TestExpandDeploymentValue(t *testing.T) {
 		Chart:            "wordpress",
 		ChartRepository:  "https://charts.bitnami.com/bitnami",
 		ProxyTLS:         "{{ release_name }}-wordpress:80",
-		DNS:              "rev2.click",
+		ProxyTLSHosts: []string{
+			"nextcloud.{{ pullpreview_public_dns }}",
+			"keycloak.{{ pullpreview_public_dns }}",
+		},
+		DNS: "rev2.click",
 	}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
 
@@ -209,6 +222,52 @@ func TestResolveHelmChartSourceForLocalChart(t *testing.T) {
 	}
 	if !source.SyncAppTree {
 		t.Fatalf("expected in-tree chart to sync app tree")
+	}
+}
+
+func TestResolveHelmChartSourceCollectsRemoteDependencyRepos(t *testing.T) {
+	appPath := t.TempDir()
+	chartPath := filepath.Join(appPath, "charts", "demo")
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	chartYAML := `apiVersion: v2
+name: demo
+version: 0.1.0
+dependencies:
+  - name: local-subchart
+    repository: file://../local-subchart
+    version: 0.1.0
+  - name: nextcloud
+    repository: https://nextcloud.github.io/helm
+    version: 7.0.0
+  - name: keycloak
+    repository: https://charts.bitnami.com/bitnami
+    version: 24.7.5
+`
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte(chartYAML), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	source, err := inst.resolveHelmChartSource(appPath)
+	if err != nil {
+		t.Fatalf("resolveHelmChartSource() error: %v", err)
+	}
+	if len(source.RepoDefs) != 2 {
+		t.Fatalf("expected two remote repo defs, got %#v", source.RepoDefs)
+	}
+	if source.RepoDefs[0].Name != "nextcloud" || source.RepoDefs[0].URL != "https://nextcloud.github.io/helm" {
+		t.Fatalf("unexpected first repo def: %#v", source.RepoDefs[0])
+	}
+	if source.RepoDefs[1].Name != "keycloak" || source.RepoDefs[1].URL != "https://charts.bitnami.com/bitnami" {
+		t.Fatalf("unexpected second repo def: %#v", source.RepoDefs[1])
 	}
 }
 
@@ -348,7 +407,11 @@ func TestRunHelmDeploymentBuildsExpectedScriptForRepoChart(t *testing.T) {
 		Chart:            "wordpress",
 		ChartRepository:  "https://charts.bitnami.com/bitnami",
 		ProxyTLS:         "{{ release_name }}-wordpress:80",
-		DNS:              "rev2.click",
+		ProxyTLSHosts: []string{
+			"nextcloud.{{ pullpreview_public_dns }}",
+			"keycloak.{{ pullpreview_public_dns }}",
+		},
+		DNS: "rev2.click",
 	}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE", CertKey: "CERT"}
 	runner := &scriptCaptureRunner{}
@@ -379,11 +442,13 @@ func TestRunHelmDeploymentBuildsExpectedScriptForRepoChart(t *testing.T) {
 		"source /etc/pullpreview/env",
 		"export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",
 		"kubectl create namespace 'pp-demo-app' --dry-run=client -o yaml | kubectl apply -f - >/dev/null",
-		"helm repo add pullpreview 'https://charts.bitnami.com/bitnami' --force-update >/dev/null",
-		"helm repo update pullpreview >/dev/null",
-		"'helm' 'upgrade' '--install' 'app' 'pullpreview/wordpress' '--namespace' 'pp-demo-app' '--create-namespace' '--wait' '--atomic' '--values' '/app/values.yaml' '--set' 'service.type=ClusterIP' '--set' 'ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click'",
+		"helm repo add 'pullpreview' 'https://charts.bitnami.com/bitnami' --force-update >/dev/null",
+		"helm repo update >/dev/null",
+		"'helm' 'upgrade' '--install' 'app' 'pullpreview/wordpress' '--namespace' 'pp-demo-app' '--create-namespace' '--wait' '--atomic' '--timeout' '15m' '--values' '/app/values.yaml' '--set' 'service.type=ClusterIP' '--set' 'ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click'",
 		"cat <<'EOF' >/tmp/pullpreview-caddy.yaml",
 		"Demo-App-ip-1-2-3-4.rev2.click {",
+		"nextcloud.Demo-App-ip-1-2-3-4.rev2.click {",
+		"keycloak.Demo-App-ip-1-2-3-4.rev2.click {",
 		"reverse_proxy app-wordpress.pp-demo-app.svc.cluster.local:80",
 		"kubectl rollout status deployment/pullpreview-caddy -n 'pp-demo-app' --timeout=10m",
 	}
@@ -423,12 +488,48 @@ func TestRunHelmDeploymentBuildsDependencyStepForLocalChart(t *testing.T) {
 	}
 }
 
+func TestRunHelmDeploymentAddsRemoteReposForLocalChartDependencies(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ProxyTLS:         "app-wordpress:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	err := inst.runHelmDeployment(helmChartSource{
+		ChartRef:   "/app/charts/demo",
+		LocalChart: "/tmp/demo",
+		RepoDefs: []helmRepoDefinition{
+			{Name: "nextcloud", URL: "https://nextcloud.github.io/helm"},
+			{Name: "bitnami", URL: "https://charts.bitnami.com/bitnami"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("runHelmDeployment() error: %v", err)
+	}
+	script := runner.inputs[0]
+	checks := []string{
+		"helm repo add 'nextcloud' 'https://nextcloud.github.io/helm' --force-update >/dev/null",
+		"helm repo add 'bitnami' 'https://charts.bitnami.com/bitnami' --force-update >/dev/null",
+		"helm repo update >/dev/null",
+		"helm dependency build '/app/charts/demo' >/dev/null",
+	}
+	for _, check := range checks {
+		if !strings.Contains(script, check) {
+			t.Fatalf("expected script to contain %q, script:\n%s", check, script)
+		}
+	}
+}
+
 func TestRenderHelmCaddyManifest(t *testing.T) {
 	inst := NewInstance("demo", CommonOptions{
 		DeploymentTarget: DeploymentTargetHelm,
 		Chart:            "wordpress",
 		ChartRepository:  "https://charts.bitnami.com/bitnami",
 		ProxyTLS:         "app-wordpress:80",
+		ProxyTLSHosts:    []string{"nextcloud.{{ pullpreview_public_dns }}", "keycloak.{{ pullpreview_public_dns }}"},
 		DNS:              "rev2.click",
 	}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
@@ -442,6 +543,12 @@ func TestRenderHelmCaddyManifest(t *testing.T) {
 	}
 	if !strings.Contains(manifest, "demo-ip-1-2-3-4.rev2.click") {
 		t.Fatalf("expected public DNS in manifest: %s", manifest)
+	}
+	if !strings.Contains(manifest, "nextcloud.demo-ip-1-2-3-4.rev2.click") {
+		t.Fatalf("expected nextcloud host in manifest: %s", manifest)
+	}
+	if !strings.Contains(manifest, "keycloak.demo-ip-1-2-3-4.rev2.click") {
+		t.Fatalf("expected keycloak host in manifest: %s", manifest)
 	}
 	if !strings.Contains(manifest, "reverse_proxy app-wordpress.pp-demo.svc.cluster.local:80") {
 		t.Fatalf("expected reverse proxy upstream in manifest: %s", manifest)

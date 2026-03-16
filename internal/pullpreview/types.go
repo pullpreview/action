@@ -79,6 +79,7 @@ type CommonOptions struct {
 	CIDRs            []string
 	Registries       []string
 	ProxyTLS         string
+	ProxyTLSHosts    []string
 	DNS              string
 	Ports            []string
 	InstanceType     string
