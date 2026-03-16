@@ -558,7 +558,12 @@ func (i *Instance) renderHelmCaddyManifest(namespace, upstreamHost string, upstr
 	var caddySites strings.Builder
 	for _, host := range i.helmProxyTLSPublicHosts() {
 		caddySites.WriteString(fmt.Sprintf(`    %s {
-      reverse_proxy %s:%d
+      reverse_proxy %s:%d {
+        header_up Host {host}
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 443
+      }
     }
 `, host, upstreamHost, upstreamPort))
 	}

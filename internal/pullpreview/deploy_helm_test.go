@@ -648,4 +648,14 @@ func TestRenderHelmCaddyManifest(t *testing.T) {
 	if !strings.Contains(manifest, "reverse_proxy app-wordpress.pp-demo.svc.cluster.local:80") {
 		t.Fatalf("expected reverse proxy upstream in manifest: %s", manifest)
 	}
+	for _, header := range []string{
+		"header_up Host {host}",
+		"header_up X-Forwarded-Host {host}",
+		"header_up X-Forwarded-Proto https",
+		"header_up X-Forwarded-Port 443",
+	} {
+		if !strings.Contains(manifest, header) {
+			t.Fatalf("expected proxy header %q in manifest: %s", header, manifest)
+		}
+	}
 }
