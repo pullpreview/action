@@ -1148,3 +1148,22 @@ func writeFixtureToTempEventFile(t *testing.T, event GitHubEvent) string {
 	}
 	return path
 }
+
+func TestInstanceToCommonPreservesHelmProxyTLSHosts(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		ProxyTLS:         "traefik:80",
+		ProxyTLSHosts: []string{
+			"nextcloud.demo.preview.run",
+			"keycloak.demo.preview.run",
+		},
+	}, fakeProvider{}, nil)
+
+	common := instanceToCommon(inst)
+	if len(common.ProxyTLSHosts) != 2 {
+		t.Fatalf("expected proxy TLS hosts to be preserved, got %#v", common.ProxyTLSHosts)
+	}
+	if common.ProxyTLSHosts[0] != "nextcloud.demo.preview.run" || common.ProxyTLSHosts[1] != "keycloak.demo.preview.run" {
+		t.Fatalf("unexpected proxy TLS hosts %#v", common.ProxyTLSHosts)
+	}
+}
