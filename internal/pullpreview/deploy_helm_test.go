@@ -228,8 +228,12 @@ func TestResolveHelmChartSourceForLocalChart(t *testing.T) {
 func TestResolveHelmChartSourceCollectsRemoteDependencyRepos(t *testing.T) {
 	appPath := t.TempDir()
 	chartPath := filepath.Join(appPath, "charts", "demo")
+	nestedPath := filepath.Join(appPath, "charts", "local-subchart")
 	if err := os.MkdirAll(chartPath, 0755); err != nil {
 		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.MkdirAll(nestedPath, 0755); err != nil {
+		t.Fatalf("mkdir nested chart path: %v", err)
 	}
 	chartYAML := `apiVersion: v2
 name: demo
@@ -248,6 +252,17 @@ dependencies:
 	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte(chartYAML), 0644); err != nil {
 		t.Fatalf("write chart: %v", err)
 	}
+	nestedChartYAML := `apiVersion: v2
+name: local-subchart
+version: 0.1.0
+dependencies:
+  - name: traefik
+    repository: https://traefik.github.io/charts
+    version: 39.0.5
+`
+	if err := os.WriteFile(filepath.Join(nestedPath, "Chart.yaml"), []byte(nestedChartYAML), 0644); err != nil {
+		t.Fatalf("write nested chart: %v", err)
+	}
 
 	inst := NewInstance("demo", CommonOptions{
 		DeploymentTarget: DeploymentTargetHelm,
@@ -260,14 +275,28 @@ dependencies:
 	if err != nil {
 		t.Fatalf("resolveHelmChartSource() error: %v", err)
 	}
-	if len(source.RepoDefs) != 2 {
-		t.Fatalf("expected two remote repo defs, got %#v", source.RepoDefs)
+	if len(source.RepoDefs) != 3 {
+		t.Fatalf("expected three remote repo defs, got %#v", source.RepoDefs)
 	}
-	if source.RepoDefs[0].Name != "nextcloud" || source.RepoDefs[0].URL != "https://nextcloud.github.io/helm" {
-		t.Fatalf("unexpected first repo def: %#v", source.RepoDefs[0])
+	gotRepos := map[string]string{}
+	for _, repo := range source.RepoDefs {
+		gotRepos[repo.Name] = repo.URL
 	}
-	if source.RepoDefs[1].Name != "keycloak" || source.RepoDefs[1].URL != "https://charts.bitnami.com/bitnami" {
-		t.Fatalf("unexpected second repo def: %#v", source.RepoDefs[1])
+	wantRepos := map[string]string{
+		"nextcloud": "https://nextcloud.github.io/helm",
+		"keycloak":  "https://charts.bitnami.com/bitnami",
+		"traefik":   "https://traefik.github.io/charts",
+	}
+	if len(gotRepos) != len(wantRepos) {
+		t.Fatalf("unexpected repo defs: %#v", source.RepoDefs)
+	}
+	for name, url := range wantRepos {
+		if gotRepos[name] != url {
+			t.Fatalf("expected repo %q=%q, got %#v", name, url, source.RepoDefs)
+		}
+	}
+	if len(source.DependencyBuildRefs) != 1 || source.DependencyBuildRefs[0] != "/app/charts/local-subchart" {
+		t.Fatalf("unexpected dependency build refs: %#v", source.DependencyBuildRefs)
 	}
 }
 
@@ -499,8 +528,9 @@ func TestRunHelmDeploymentAddsRemoteReposForLocalChartDependencies(t *testing.T)
 	inst.Runner = runner
 
 	err := inst.runHelmDeployment(helmChartSource{
-		ChartRef:   "/app/charts/demo",
-		LocalChart: "/tmp/demo",
+		ChartRef:            "/app/charts/demo",
+		LocalChart:          "/tmp/demo",
+		DependencyBuildRefs: []string{"/app/charts/local-subchart"},
 		RepoDefs: []helmRepoDefinition{
 			{Name: "nextcloud", URL: "https://nextcloud.github.io/helm"},
 			{Name: "bitnami", URL: "https://charts.bitnami.com/bitnami"},
@@ -514,12 +544,77 @@ func TestRunHelmDeploymentAddsRemoteReposForLocalChartDependencies(t *testing.T)
 		"helm repo add 'nextcloud' 'https://nextcloud.github.io/helm' --force-update >/dev/null",
 		"helm repo add 'bitnami' 'https://charts.bitnami.com/bitnami' --force-update >/dev/null",
 		"helm repo update >/dev/null",
+		"helm dependency build '/app/charts/local-subchart' >/dev/null",
 		"helm dependency build '/app/charts/demo' >/dev/null",
 	}
 	for _, check := range checks {
 		if !strings.Contains(script, check) {
 			t.Fatalf("expected script to contain %q, script:\n%s", check, script)
 		}
+	}
+}
+
+func TestDeployWithHelmSyncsExternalLocalDependencies(t *testing.T) {
+	appPath := t.TempDir()
+	chartPath := filepath.Join(appPath, "charts", "demo")
+	externalDepRoot := filepath.Join(t.TempDir(), "external")
+	externalDepPath := filepath.Join(externalDepRoot, "shared-chart")
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.MkdirAll(externalDepPath, 0755); err != nil {
+		t.Fatalf("mkdir external dependency path: %v", err)
+	}
+	chartYAML := `apiVersion: v2
+name: demo
+version: 0.1.0
+dependencies:
+  - name: shared-chart
+    repository: file://` + externalDepPath + `
+    version: 0.1.0
+`
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte(chartYAML), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(externalDepPath, "Chart.yaml"), []byte("apiVersion: v2\nname: shared-chart\nversion: 0.1.0\n"), 0644); err != nil {
+		t.Fatalf("write external chart: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	if err := inst.DeployWithHelm(appPath); err != nil {
+		t.Fatalf("DeployWithHelm() error: %v", err)
+	}
+	foundAppSync := false
+	foundExternalSync := false
+	foundHelmBuild := false
+	for idx, args := range runner.args {
+		joined := strings.Join(args, " ")
+		if len(args) > 0 && args[0] == "rsync" && strings.Contains(joined, remoteAppPath+"/") {
+			foundAppSync = true
+		}
+		if len(args) > 0 && args[0] == "rsync" && strings.Contains(joined, externalHelmChartPath(externalDepPath)) {
+			foundExternalSync = true
+		}
+		if idx < len(runner.inputs) && strings.Contains(runner.inputs[idx], "helm dependency build '"+externalHelmChartPath(externalDepPath)+"' >/dev/null") {
+			foundHelmBuild = true
+		}
+	}
+	if !foundAppSync {
+		t.Fatalf("expected app tree sync, commands: %#v", runner.args)
+	}
+	if !foundExternalSync {
+		t.Fatalf("expected external dependency sync, commands: %#v", runner.args)
+	}
+	if !foundHelmBuild {
+		t.Fatalf("expected helm dependency build for external dependency, scripts: %#v", runner.inputs)
 	}
 }
 
