@@ -502,6 +502,7 @@ func (i *Instance) runHelmDeployment(source helmChartSource, valueArgs []string)
 		manifest,
 		"EOF",
 		"kubectl apply -f /tmp/pullpreview-caddy.yaml >/dev/null",
+		fmt.Sprintf("kubectl rollout restart deployment/pullpreview-caddy -n %s >/dev/null", shellQuote(namespace)),
 		fmt.Sprintf("kubectl rollout status deployment/pullpreview-caddy -n %s --timeout=10m", shellQuote(namespace)),
 	)
 	repoDefs := source.RepoDefs

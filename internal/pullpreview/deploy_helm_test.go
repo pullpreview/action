@@ -479,6 +479,7 @@ func TestRunHelmDeploymentBuildsExpectedScriptForRepoChart(t *testing.T) {
 		"nextcloud.Demo-App-ip-1-2-3-4.rev2.click {",
 		"keycloak.Demo-App-ip-1-2-3-4.rev2.click {",
 		"reverse_proxy app-wordpress.pp-demo-app.svc.cluster.local:80",
+		"kubectl rollout restart deployment/pullpreview-caddy -n 'pp-demo-app' >/dev/null",
 		"kubectl rollout status deployment/pullpreview-caddy -n 'pp-demo-app' --timeout=10m",
 	}
 	for _, check := range checks {
