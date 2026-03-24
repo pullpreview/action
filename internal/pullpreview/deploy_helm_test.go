@@ -377,7 +377,7 @@ func TestResolveHelmChartSourceForOCIChart(t *testing.T) {
 	}
 }
 
-func TestHelmValueArgsExpandsPlaceholdersAndSyncsValuesFiles(t *testing.T) {
+func TestHelmValueArgsKeepsPlainInTreeValuesOnAppSyncPath(t *testing.T) {
 	appPath := t.TempDir()
 	for _, path := range []string{
 		filepath.Join(appPath, "values.yaml"),
@@ -406,10 +406,11 @@ func TestHelmValueArgsExpandsPlaceholdersAndSyncsValuesFiles(t *testing.T) {
 	}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
 
-	args, requiresSync, err := inst.helmValueArgs(appPath)
+	plan, err := inst.helmValueArgs(appPath)
 	if err != nil {
 		t.Fatalf("helmValueArgs() error: %v", err)
 	}
+	defer plan.cleanup()
 	want := []string{
 		"--values", "/app/values.yaml",
 		"--values", "/app/overrides/preview.yaml",
@@ -417,16 +418,173 @@ func TestHelmValueArgsExpandsPlaceholdersAndSyncsValuesFiles(t *testing.T) {
 		"--set", "ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click",
 		"--set", "url=https://Demo-App-ip-1-2-3-4.rev2.click:443",
 	}
-	if len(args) != len(want) {
-		t.Fatalf("unexpected helm args length: got=%#v want=%#v", args, want)
+	if len(plan.Args) != len(want) {
+		t.Fatalf("unexpected helm args length: got=%#v want=%#v", plan.Args, want)
 	}
 	for idx := range want {
-		if args[idx] != want[idx] {
-			t.Fatalf("unexpected helm arg %d: got=%q want=%q all=%#v", idx, args[idx], want[idx], args)
+		if plan.Args[idx] != want[idx] {
+			t.Fatalf("unexpected helm arg %d: got=%q want=%q all=%#v", idx, plan.Args[idx], want[idx], plan.Args)
 		}
 	}
-	if !requiresSync {
+	if !plan.RequiresAppSync {
 		t.Fatalf("expected local values files to require sync")
+	}
+	if len(plan.ExtraSyncPaths) != 0 {
+		t.Fatalf("did not expect rendered values sync paths, got %#v", plan.ExtraSyncPaths)
+	}
+}
+
+func TestHelmValueArgsRendersTemplatedValuesFiles(t *testing.T) {
+	appPath := t.TempDir()
+	valuePath := filepath.Join(appPath, "values.preview.yaml")
+	content := strings.Join([]string{
+		"ingress:",
+		"  hostname: {{ pullpreview_public_dns }}",
+		"  url: {{pullpreview_url}}",
+		"  namespace: {{ namespace }}",
+		"",
+	}, "\n")
+	if err := os.WriteFile(valuePath, []byte(content), 0644); err != nil {
+		t.Fatalf("write values file: %v", err)
+	}
+
+	inst := NewInstance("Demo App", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ChartValues:      []string{"values.preview.yaml"},
+		ProxyTLS:         "{{ release_name }}-wordpress:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	plan, err := inst.helmValueArgs(appPath)
+	if err != nil {
+		t.Fatalf("helmValueArgs() error: %v", err)
+	}
+	defer plan.cleanup()
+
+	if plan.RequiresAppSync {
+		t.Fatalf("did not expect rendered values file to reuse app tree sync path")
+	}
+	if len(plan.ExtraSyncPaths) != 1 {
+		t.Fatalf("expected one rendered values sync path, got %#v", plan.ExtraSyncPaths)
+	}
+	if len(plan.Args) != 2 || plan.Args[0] != "--values" {
+		t.Fatalf("unexpected helm args: %#v", plan.Args)
+	}
+	remotePath := plan.Args[1]
+	if remotePath != plan.ExtraSyncPaths[0].Remote {
+		t.Fatalf("expected helm args to reference rendered remote path, args=%#v sync=%#v", plan.Args, plan.ExtraSyncPaths)
+	}
+	if !strings.HasPrefix(remotePath, "/app/.pullpreview/helm-values/") {
+		t.Fatalf("unexpected rendered remote path: %q", remotePath)
+	}
+	rendered, err := os.ReadFile(plan.ExtraSyncPaths[0].Local)
+	if err != nil {
+		t.Fatalf("read rendered values file: %v", err)
+	}
+	wantRendered := strings.Join([]string{
+		"ingress:",
+		"  hostname: Demo-App-ip-1-2-3-4.rev2.click",
+		"  url: https://Demo-App-ip-1-2-3-4.rev2.click:443",
+		"  namespace: pp-demo-app",
+		"",
+	}, "\n")
+	if string(rendered) != wantRendered {
+		t.Fatalf("unexpected rendered values file:\n%s", rendered)
+	}
+}
+
+func TestHelmValueArgsStagesValuesFilesOutsideAppPath(t *testing.T) {
+	root := t.TempDir()
+	appPath := filepath.Join(root, "app")
+	externalRoot := filepath.Join(root, "shared")
+	if err := os.MkdirAll(appPath, 0755); err != nil {
+		t.Fatalf("mkdir app path: %v", err)
+	}
+	if err := os.MkdirAll(externalRoot, 0755); err != nil {
+		t.Fatalf("mkdir external root: %v", err)
+	}
+	externalPath := filepath.Join(externalRoot, "values.yaml")
+	if err := os.WriteFile(externalPath, []byte("key: value\n"), 0644); err != nil {
+		t.Fatalf("write external values file: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ChartValues:      []string{externalPath},
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	plan, err := inst.helmValueArgs(appPath)
+	if err != nil {
+		t.Fatalf("helmValueArgs() error: %v", err)
+	}
+	defer plan.cleanup()
+
+	if plan.RequiresAppSync {
+		t.Fatalf("did not expect external values file to trigger app tree sync")
+	}
+	if len(plan.ExtraSyncPaths) != 1 {
+		t.Fatalf("expected one staged external values file, got %#v", plan.ExtraSyncPaths)
+	}
+	if len(plan.Args) != 2 || plan.Args[1] != plan.ExtraSyncPaths[0].Remote {
+		t.Fatalf("unexpected helm args for external values file: %#v", plan.Args)
+	}
+	if !strings.HasPrefix(plan.ExtraSyncPaths[0].Remote, "/app/.pullpreview/helm-values/") {
+		t.Fatalf("unexpected remote values path: %#v", plan.ExtraSyncPaths)
+	}
+}
+
+func TestDeployWithHelmSyncsRenderedValuesFiles(t *testing.T) {
+	appPath := t.TempDir()
+	chartPath := filepath.Join(appPath, "charts", "demo")
+	valuePath := filepath.Join(appPath, "values.preview.yaml")
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: demo\nversion: 0.1.0\n"), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+	if err := os.WriteFile(valuePath, []byte("host: {{ pullpreview_public_dns }}\n"), 0644); err != nil {
+		t.Fatalf("write values file: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ChartValues:      []string{"values.preview.yaml"},
+		ProxyTLS:         "demo:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	if err := inst.DeployWithHelm(appPath); err != nil {
+		t.Fatalf("DeployWithHelm() error: %v", err)
+	}
+
+	foundRenderedSync := false
+	foundRenderedArg := false
+	for idx, args := range runner.args {
+		joined := strings.Join(args, " ")
+		if len(args) > 0 && args[0] == "rsync" && strings.Contains(joined, "/app/.pullpreview/helm-values/") {
+			foundRenderedSync = true
+		}
+		if idx < len(runner.inputs) && strings.Contains(runner.inputs[idx], "/app/.pullpreview/helm-values/") {
+			foundRenderedArg = true
+		}
+	}
+	if !foundRenderedSync {
+		t.Fatalf("expected rendered values sync, commands: %#v", runner.args)
+	}
+	if !foundRenderedArg {
+		t.Fatalf("expected helm command to reference rendered values path, scripts: %#v", runner.inputs)
 	}
 }
 

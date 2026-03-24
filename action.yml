@@ -18,6 +18,10 @@ inputs:
   label:
     description: "Label to use for triggering preview deployments"
     default: "pullpreview"
+  force_action:
+    description: "Override github-sync event-derived action selection: up or down"
+    required: false
+    default: ""
   github_token:
     description: "The GitHub access token used to perform GitHub API operations (labels, comments, collaborator/keys lookup)."
     default: "${{ github.token }}"
@@ -180,30 +184,38 @@ runs:
           app_path="${GITHUB_WORKSPACE}"
         fi
 
-        "${binary}" github-sync "${app_path}" \
-          --admins "${{ inputs.admins }}" \
-          --cidrs "${{ inputs.cidrs }}" \
-          --deployment-target "${{ inputs.deployment_target }}" \
-          --compose-files "${{ inputs.compose_files }}" \
-          --compose-options "${{ inputs.compose_options }}" \
-          --chart "${{ inputs.chart }}" \
-          --chart-repository "${{ inputs.chart_repository }}" \
-          --chart-values "${{ inputs.chart_values }}" \
-          --chart-set "${{ inputs.chart_set }}" \
-          --dns "${{ inputs.dns }}" \
-          --label "${{ inputs.label }}" \
-          --ports "${{ inputs.ports }}" \
-          --default-port "${{ inputs.default_port }}" \
-          --instance-type "${{ inputs.instance_type }}" \
-          --region "${{ inputs.region }}" \
-          --image "${{ inputs.image }}" \
-          --deployment-variant "${{ inputs.deployment_variant }}" \
-          --registries "${{ inputs.registries }}" \
-          --proxy-tls "${{ inputs.proxy_tls }}" \
-          --proxy-tls-hosts "${{ inputs.proxy_tls_hosts }}" \
-          --pre-script "${{ inputs.pre_script }}" \
-          --ttl "${{ inputs.ttl }}" \
+        args=(
+          github-sync "${app_path}"
+          --admins "${{ inputs.admins }}"
+          --cidrs "${{ inputs.cidrs }}"
+          --deployment-target "${{ inputs.deployment_target }}"
+          --compose-files "${{ inputs.compose_files }}"
+          --compose-options "${{ inputs.compose_options }}"
+          --chart "${{ inputs.chart }}"
+          --chart-repository "${{ inputs.chart_repository }}"
+          --chart-values "${{ inputs.chart_values }}"
+          --chart-set "${{ inputs.chart_set }}"
+          --dns "${{ inputs.dns }}"
+          --label "${{ inputs.label }}"
+          --ports "${{ inputs.ports }}"
+          --default-port "${{ inputs.default_port }}"
+          --instance-type "${{ inputs.instance_type }}"
+          --region "${{ inputs.region }}"
+          --image "${{ inputs.image }}"
+          --deployment-variant "${{ inputs.deployment_variant }}"
+          --registries "${{ inputs.registries }}"
+          --proxy-tls "${{ inputs.proxy_tls }}"
+          --proxy-tls-hosts "${{ inputs.proxy_tls_hosts }}"
+          --pre-script "${{ inputs.pre_script }}"
+          --ttl "${{ inputs.ttl }}"
           --templated-url "${{ inputs.templated_url }}"
+        )
+
+        if [ -n "${{ inputs.force_action }}" ]; then
+          args+=(--force-action "${{ inputs.force_action }}")
+        fi
+
+        "${binary}" "${args[@]}"
 
         if grep -q '^url=' "${GITHUB_OUTPUT}"; then
           echo "live=true" >> "${GITHUB_OUTPUT}"

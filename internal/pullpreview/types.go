@@ -123,6 +123,7 @@ type ListOptions struct {
 type GithubSyncOptions struct {
 	AppPath           string
 	Label             string
+	ForceAction       string
 	DeploymentVariant string
 	TTL               string
 	TemplatedURL      string

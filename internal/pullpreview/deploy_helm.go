@@ -39,6 +39,19 @@ type helmSyncPath struct {
 	Remote string
 }
 
+type helmValuePlan struct {
+	Args            []string
+	RequiresAppSync bool
+	ExtraSyncPaths  []helmSyncPath
+	TempDirs        []string
+}
+
+func (p *helmValuePlan) cleanup() {
+	for _, tempDir := range p.TempDirs {
+		_ = os.RemoveAll(tempDir)
+	}
+}
+
 func (i *Instance) HelmNamespace() string {
 	return kubernetesName("pp-" + i.Name)
 }
@@ -95,12 +108,13 @@ func (i *Instance) DeployWithHelm(appPath string) error {
 	if err != nil {
 		return err
 	}
-	valueArgs, syncForValues, err := i.helmValueArgs(appPath)
+	valuePlan, err := i.helmValueArgs(appPath)
 	if err != nil {
 		return err
 	}
+	defer valuePlan.cleanup()
 
-	if chartSource.SyncAppTree || syncForValues {
+	if chartSource.SyncAppTree || valuePlan.RequiresAppSync {
 		if err := i.syncRemoteAppTree(appPath); err != nil {
 			return err
 		}
@@ -115,10 +129,15 @@ func (i *Instance) DeployWithHelm(appPath string) error {
 			return err
 		}
 	}
+	for _, syncPath := range valuePlan.ExtraSyncPaths {
+		if err := i.syncRemotePath(syncPath.Local, syncPath.Remote); err != nil {
+			return err
+		}
+	}
 	if err := i.runRemotePreScript(appPath); err != nil {
 		return err
 	}
-	if err := i.runHelmDeployment(chartSource, valueArgs); err != nil {
+	if err := i.runHelmDeployment(chartSource, valuePlan.Args); err != nil {
 		i.emitHelmFailureReport()
 		return err
 	}
@@ -339,6 +358,16 @@ func externalHelmChartPath(localChart string) string {
 	return remoteAppPath + "/.pullpreview/charts/" + sum[:12] + "/" + name
 }
 
+func externalHelmValuesPath(sourcePath string, content []byte) string {
+	hash := sha1.New()
+	_, _ = hash.Write([]byte(filepath.Clean(sourcePath)))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(content)
+	sum := fmt.Sprintf("%x", hash.Sum(nil))
+	name := sanitizeRemotePathComponent(filepath.Base(sourcePath))
+	return remoteAppPath + "/.pullpreview/helm-values/" + sum[:12] + "/" + name
+}
+
 func sanitizeRemotePathComponent(value string) string {
 	var b strings.Builder
 	for _, r := range strings.TrimSpace(value) {
@@ -362,19 +391,24 @@ func sanitizeRemotePathComponent(value string) string {
 	return name
 }
 
-func (i *Instance) helmValueArgs(appPath string) ([]string, bool, error) {
+func (i *Instance) helmValueArgs(appPath string) (plan helmValuePlan, err error) {
+	defer func() {
+		if err != nil {
+			plan.cleanup()
+		}
+	}()
+
 	if len(i.ChartValues) == 0 && len(i.ChartSet) == 0 {
-		return nil, false, nil
+		return plan, nil
 	}
 
 	absAppPath, err := filepath.Abs(appPath)
 	if err != nil {
-		return nil, false, err
+		return plan, err
 	}
 
-	args := []string{}
-	requiresSync := false
-	for _, raw := range i.ChartValues {
+	tempDir := ""
+	for idx, raw := range i.ChartValues {
 		valuePath := strings.TrimSpace(raw)
 		if valuePath == "" {
 			continue
@@ -383,24 +417,47 @@ func (i *Instance) helmValueArgs(appPath string) ([]string, bool, error) {
 			valuePath = filepath.Join(absAppPath, valuePath)
 		}
 		valuePath = filepath.Clean(valuePath)
-		if _, err := os.Stat(valuePath); err != nil {
-			return nil, false, fmt.Errorf("unable to access chart values file %s: %w", raw, err)
+		content, readErr := os.ReadFile(valuePath)
+		if readErr != nil {
+			return plan, fmt.Errorf("unable to access chart values file %s: %w", raw, readErr)
 		}
-		remotePath, err := remoteBindSource(valuePath, absAppPath, remoteAppPath)
-		if err != nil {
-			return nil, false, fmt.Errorf("chart values %s: %w", raw, err)
+		rendered := []byte(i.expandDeploymentValue(string(content)))
+		if pathWithinRoot(absAppPath, valuePath) && bytes.Equal(content, rendered) {
+			remotePath, bindErr := remoteBindSource(valuePath, absAppPath, remoteAppPath)
+			if bindErr != nil {
+				return plan, fmt.Errorf("chart values %s: %w", raw, bindErr)
+			}
+			plan.Args = append(plan.Args, "--values", remotePath)
+			plan.RequiresAppSync = true
+			continue
 		}
-		args = append(args, "--values", remotePath)
-		requiresSync = true
+
+		if tempDir == "" {
+			tempDir, err = os.MkdirTemp("", "pullpreview-helm-values-*")
+			if err != nil {
+				return plan, err
+			}
+			plan.TempDirs = append(plan.TempDirs, tempDir)
+		}
+		tempPath := filepath.Join(tempDir, fmt.Sprintf("%02d-%s", idx, filepath.Base(valuePath)))
+		if err := os.WriteFile(tempPath, rendered, 0600); err != nil {
+			return plan, fmt.Errorf("write rendered chart values %s: %w", raw, err)
+		}
+		remotePath := externalHelmValuesPath(valuePath, rendered)
+		plan.ExtraSyncPaths = append(plan.ExtraSyncPaths, helmSyncPath{
+			Local:  tempPath,
+			Remote: remotePath,
+		})
+		plan.Args = append(plan.Args, "--values", remotePath)
 	}
 	for _, raw := range i.ChartSet {
 		value := strings.TrimSpace(raw)
 		if value == "" {
 			continue
 		}
-		args = append(args, "--set", i.expandDeploymentValue(value))
+		plan.Args = append(plan.Args, "--set", i.expandDeploymentValue(value))
 	}
-	return args, requiresSync, nil
+	return plan, nil
 }
 
 func (i *Instance) syncRemoteAppTree(appPath string) error {

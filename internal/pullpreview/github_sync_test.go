@@ -396,6 +396,65 @@ func TestValidateDeploymentVariant(t *testing.T) {
 	}
 }
 
+func TestResolveActionValidatesForceAction(t *testing.T) {
+	tests := []struct {
+		name        string
+		forceAction string
+		wantErr     bool
+	}{
+		{name: "empty", forceAction: "", wantErr: false},
+		{name: "up", forceAction: "up", wantErr: false},
+		{name: "down", forceAction: "down", wantErr: false},
+		{name: "mixed case", forceAction: "UP", wantErr: false},
+		{name: "invalid", forceAction: "sideways", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sync := newSync(loadFixtureEvent(t, "github_event_labeled.json"), GithubSyncOptions{
+				Label:       "pullpreview",
+				ForceAction: tt.forceAction,
+				Common:      CommonOptions{},
+			}, &fakeGitHub{}, fakeProvider{running: true})
+
+			_, err := sync.resolveAction()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveAction() error=%v, wantErr=%v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestResolveActionUsesForceActionOverride(t *testing.T) {
+	labeledEvent := loadFixtureEvent(t, "github_event_labeled.json")
+	labeledSync := newSync(labeledEvent, GithubSyncOptions{
+		Label:       "pullpreview",
+		ForceAction: "down",
+		Common:      CommonOptions{},
+	}, &fakeGitHub{}, fakeProvider{running: true})
+	got, err := labeledSync.resolveAction()
+	if err != nil {
+		t.Fatalf("resolveAction() error: %v", err)
+	}
+	if got != actionPRDown {
+		t.Fatalf("resolveAction()=%s, want %s", got, actionPRDown)
+	}
+
+	pushEvent := loadFixtureEvent(t, "github_event_push_solo_organization.json")
+	pushSync := newSync(pushEvent, GithubSyncOptions{
+		Label:       "pullpreview",
+		ForceAction: "up",
+		Common:      CommonOptions{},
+	}, &fakeGitHub{latestSHA: pushEvent.HeadCommit.ID}, fakeProvider{running: true})
+	got, err = pushSync.resolveAction()
+	if err != nil {
+		t.Fatalf("resolveAction() error: %v", err)
+	}
+	if got != actionPRPush {
+		t.Fatalf("resolveAction()=%s, want %s", got, actionPRPush)
+	}
+}
+
 func TestRunGithubSyncFromEnvironmentRunsUpForLabeledPR(t *testing.T) {
 	t.Setenv("PULLPREVIEW_TEST", "1")
 	event := loadFixtureEvent(t, "github_event_labeled.json")
@@ -430,6 +489,81 @@ func TestRunGithubSyncFromEnvironmentRunsUpForLabeledPR(t *testing.T) {
 	}
 	if !upCalled {
 		t.Fatalf("expected up flow to be executed")
+	}
+}
+
+func TestRunGithubSyncFromEnvironmentRejectsInvalidForceAction(t *testing.T) {
+	t.Setenv("PULLPREVIEW_TEST", "1")
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	path := writeFixtureToTempEventFile(t, event)
+	t.Setenv("GITHUB_EVENT_NAME", "pull_request")
+	t.Setenv("GITHUB_EVENT_PATH", path)
+	t.Setenv("GITHUB_REPOSITORY", "pullpreview/action")
+
+	err := RunGithubSync(GithubSyncOptions{
+		AppPath:     "/tmp/app",
+		Label:       "pullpreview",
+		ForceAction: "invalid",
+		Common:      CommonOptions{},
+	}, fakeProvider{running: true}, nil)
+	if err == nil || !strings.Contains(err.Error(), "--force-action must be one of: up, down") {
+		t.Fatalf("RunGithubSync() error=%v, want invalid force-action error", err)
+	}
+}
+
+func TestSyncForcedUpRunsForIgnoredLabeledEvent(t *testing.T) {
+	t.Setenv("PULLPREVIEW_TEST", "1")
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	event.Label = &GitHubLabel{Name: "auth-oauth2"}
+	event.PullRequest.Labels = []GitHubLabel{
+		{Name: "pullpreview"},
+		{Name: "auth-oauth2"},
+	}
+	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
+	upCalled := false
+	sync := newSync(event, GithubSyncOptions{
+		Label:       "pullpreview",
+		ForceAction: "up",
+		Common:      CommonOptions{},
+	}, client, fakeProvider{running: true})
+	sync.runUp = func(opts UpOptions, provider Provider, logger *Logger) (*Instance, error) {
+		upCalled = true
+		inst := NewInstance(opts.Name, opts.Common, provider, logger)
+		inst.Access = AccessDetails{Username: "ec2-user", IPAddress: "1.2.3.4"}
+		return inst, nil
+	}
+
+	if err := sync.Sync(); err != nil {
+		t.Fatalf("Sync() returned error: %v", err)
+	}
+	if !upCalled {
+		t.Fatalf("expected forced up flow to be executed")
+	}
+}
+
+func TestSyncForcedDownDoesNotRemoveLabelOnOpenPR(t *testing.T) {
+	t.Setenv("PULLPREVIEW_TEST", "1")
+	event := loadFixtureEvent(t, "github_event_labeled.json")
+	client := &fakeGitHub{latestSHA: event.PullRequest.Head.SHA}
+	downCalls := 0
+	sync := newSync(event, GithubSyncOptions{
+		Label:       "pullpreview",
+		ForceAction: "down",
+		Common:      CommonOptions{},
+	}, client, fakeProvider{running: true})
+	sync.runDown = func(opts DownOptions, provider Provider, logger *Logger) error {
+		downCalls++
+		return nil
+	}
+
+	if err := sync.Sync(); err != nil {
+		t.Fatalf("Sync() returned error: %v", err)
+	}
+	if downCalls == 0 {
+		t.Fatalf("expected forced down flow to be executed")
+	}
+	if len(client.removedLabels) != 0 {
+		t.Fatalf("expected no label removal on open PR forced down, got %v", client.removedLabels)
 	}
 }
 

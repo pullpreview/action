@@ -115,6 +115,7 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 	fs := flag.NewFlagSet("github-sync", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	label := fs.String("label", "pullpreview", "Label to use for triggering preview deployments")
+	forceAction := fs.String("force-action", "", "Override event-derived action selection (up|down)")
 	deploymentVariant := fs.String("deployment-variant", "", "Deployment variant (4 chars max)")
 	ttl := fs.String("ttl", "infinite", "Maximum time to live for deployments (e.g. 10h, 5d, infinite)")
 	templatedURL := fs.String("templated-url", "", "Template for the preview URL (use {{ pullpreview_url }} as placeholder)")
@@ -137,6 +138,7 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 	opts := pullpreview.GithubSyncOptions{
 		AppPath:           appPath,
 		Label:             *label,
+		ForceAction:       *forceAction,
 		DeploymentVariant: *deploymentVariant,
 		TTL:               *ttl,
 		TemplatedURL:      *templatedURL,
