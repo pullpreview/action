@@ -8,19 +8,48 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
 	helmReleaseName             = "app"
 	helmFailureReportOutputSize = 12000
+	helmDeployTimeout           = "15m"
 )
 
 type helmChartSource struct {
-	ChartRef     string
-	LocalChart   string
-	RepoURL      string
-	RequiresSync bool
-	SyncAppTree  bool
+	ChartRef            string
+	LocalChart          string
+	RepoURL             string
+	RepoDefs            []helmRepoDefinition
+	RequiresSync        bool
+	SyncAppTree         bool
+	DependencyBuildRefs []string
+	ExtraSyncPaths      []helmSyncPath
+}
+
+type helmRepoDefinition struct {
+	Name string
+	URL  string
+}
+
+type helmSyncPath struct {
+	Local  string
+	Remote string
+}
+
+type helmValuePlan struct {
+	Args            []string
+	RequiresAppSync bool
+	ExtraSyncPaths  []helmSyncPath
+	TempDirs        []string
+}
+
+func (p *helmValuePlan) cleanup() {
+	for _, tempDir := range p.TempDirs {
+		_ = os.RemoveAll(tempDir)
+	}
 }
 
 func (i *Instance) HelmNamespace() string {
@@ -79,12 +108,13 @@ func (i *Instance) DeployWithHelm(appPath string) error {
 	if err != nil {
 		return err
 	}
-	valueArgs, syncForValues, err := i.helmValueArgs(appPath)
+	valuePlan, err := i.helmValueArgs(appPath)
 	if err != nil {
 		return err
 	}
+	defer valuePlan.cleanup()
 
-	if chartSource.SyncAppTree || syncForValues {
+	if chartSource.SyncAppTree || valuePlan.RequiresAppSync {
 		if err := i.syncRemoteAppTree(appPath); err != nil {
 			return err
 		}
@@ -94,10 +124,20 @@ func (i *Instance) DeployWithHelm(appPath string) error {
 			return err
 		}
 	}
+	for _, syncPath := range chartSource.ExtraSyncPaths {
+		if err := i.syncRemotePath(syncPath.Local, syncPath.Remote); err != nil {
+			return err
+		}
+	}
+	for _, syncPath := range valuePlan.ExtraSyncPaths {
+		if err := i.syncRemotePath(syncPath.Local, syncPath.Remote); err != nil {
+			return err
+		}
+	}
 	if err := i.runRemotePreScript(appPath); err != nil {
 		return err
 	}
-	if err := i.runHelmDeployment(chartSource, valueArgs); err != nil {
+	if err := i.runHelmDeployment(chartSource, valuePlan.Args); err != nil {
 		i.emitHelmFailureReport()
 		return err
 	}
@@ -116,6 +156,7 @@ func (i *Instance) resolveHelmChartSource(appPath string) (helmChartSource, erro
 		return helmChartSource{
 			ChartRef: fmt.Sprintf("pullpreview/%s", strings.TrimLeft(chart, "/")),
 			RepoURL:  repoURL,
+			RepoDefs: []helmRepoDefinition{{Name: "pullpreview", URL: repoURL}},
 		}, nil
 	}
 
@@ -131,23 +172,176 @@ func (i *Instance) resolveHelmChartSource(appPath string) (helmChartSource, erro
 	if _, err := os.Stat(localChart); err != nil {
 		return helmChartSource{}, fmt.Errorf("unable to access chart %s: %w", chart, err)
 	}
+	repoDefs, dependencyPaths, err := helmDependencyInputs(localChart)
+	if err != nil {
+		return helmChartSource{}, fmt.Errorf("chart %s: %w", chart, err)
+	}
+	buildRefs := make([]string, 0, len(dependencyPaths))
+	extraSyncPaths := []helmSyncPath{}
+	for _, dependencyPath := range dependencyPaths {
+		if pathWithinRoot(absAppPath, dependencyPath) {
+			remoteRef, err := remoteBindSource(dependencyPath, absAppPath, remoteAppPath)
+			if err != nil {
+				return helmChartSource{}, fmt.Errorf("chart %s: %w", chart, err)
+			}
+			buildRefs = append(buildRefs, remoteRef)
+			continue
+		}
+
+		remoteRef := externalHelmChartPath(dependencyPath)
+		buildRefs = append(buildRefs, remoteRef)
+		extraSyncPaths = append(extraSyncPaths, helmSyncPath{
+			Local:  dependencyPath,
+			Remote: remoteRef,
+		})
+	}
 	if pathWithinRoot(absAppPath, localChart) {
 		remoteChart, err := remoteBindSource(localChart, absAppPath, remoteAppPath)
 		if err != nil {
 			return helmChartSource{}, fmt.Errorf("chart %s: %w", chart, err)
 		}
 		return helmChartSource{
-			ChartRef:     remoteChart,
-			LocalChart:   localChart,
-			RequiresSync: true,
-			SyncAppTree:  true,
+			ChartRef:            remoteChart,
+			LocalChart:          localChart,
+			RepoDefs:            repoDefs,
+			RequiresSync:        true,
+			SyncAppTree:         true,
+			DependencyBuildRefs: buildRefs,
+			ExtraSyncPaths:      extraSyncPaths,
 		}, nil
 	}
+	remoteChart := externalHelmChartPath(localChart)
 	return helmChartSource{
-		ChartRef:     externalHelmChartPath(localChart),
-		LocalChart:   localChart,
-		RequiresSync: true,
+		ChartRef:            remoteChart,
+		LocalChart:          localChart,
+		RepoDefs:            repoDefs,
+		RequiresSync:        true,
+		DependencyBuildRefs: buildRefs,
+		ExtraSyncPaths: append(extraSyncPaths, helmSyncPath{
+			Local:  localChart,
+			Remote: remoteChart,
+		}),
 	}, nil
+}
+
+type localHelmChartMetadata struct {
+	Dependencies []localHelmChartDependency `yaml:"dependencies"`
+}
+
+type localHelmChartDependency struct {
+	Name       string `yaml:"name"`
+	Repository string `yaml:"repository"`
+}
+
+func helmDependencyInputs(chartPath string) ([]helmRepoDefinition, []string, error) {
+	visited := map[string]bool{}
+	repos := []helmRepoDefinition{}
+	buildPaths := []string{}
+	urlToName := map[string]string{}
+	usedNames := map[string]bool{}
+
+	var walk func(string) error
+	walk = func(path string) error {
+		path = filepath.Clean(path)
+		if visited[path] {
+			return nil
+		}
+		visited[path] = true
+
+		metadata, err := loadLocalHelmChartMetadata(path)
+		if err != nil {
+			return err
+		}
+
+		for _, dep := range metadata.Dependencies {
+			repoURL := strings.TrimSpace(dep.Repository)
+			switch {
+			case strings.HasPrefix(repoURL, "http://") || strings.HasPrefix(repoURL, "https://"):
+				if existing, ok := urlToName[repoURL]; ok {
+					repos = append(repos, helmRepoDefinition{Name: existing, URL: repoURL})
+					continue
+				}
+				name := uniqueHelmRepoName(dep.Name, repoURL, usedNames)
+				urlToName[repoURL] = name
+				usedNames[name] = true
+				repos = append(repos, helmRepoDefinition{Name: name, URL: repoURL})
+			case strings.HasPrefix(repoURL, "file://"):
+				dependencyPath := strings.TrimSpace(strings.TrimPrefix(repoURL, "file://"))
+				if dependencyPath == "" {
+					return fmt.Errorf("chart %s: empty file:// dependency for %q", path, dep.Name)
+				}
+				if !filepath.IsAbs(dependencyPath) {
+					dependencyPath = filepath.Join(path, dependencyPath)
+				}
+				if err := walk(dependencyPath); err != nil {
+					return err
+				}
+			}
+		}
+
+		buildPaths = append(buildPaths, path)
+		return nil
+	}
+
+	if err := walk(chartPath); err != nil {
+		return nil, nil, err
+	}
+	if len(buildPaths) > 0 {
+		buildPaths = buildPaths[:len(buildPaths)-1]
+	}
+	return uniqueHelmRepoDefinitions(repos), buildPaths, nil
+}
+
+func loadLocalHelmChartMetadata(chartPath string) (localHelmChartMetadata, error) {
+	chartYAMLPath := filepath.Join(chartPath, "Chart.yaml")
+	data, err := os.ReadFile(chartYAMLPath)
+	if err != nil {
+		return localHelmChartMetadata{}, fmt.Errorf("read %s: %w", chartYAMLPath, err)
+	}
+
+	var metadata localHelmChartMetadata
+	if err := yaml.Unmarshal(data, &metadata); err != nil {
+		return localHelmChartMetadata{}, fmt.Errorf("parse %s: %w", chartYAMLPath, err)
+	}
+	return metadata, nil
+}
+
+func uniqueHelmRepoName(preferred, repoURL string, used map[string]bool) string {
+	candidate := sanitizeRemotePathComponent(preferred)
+	if candidate == "" || candidate == "chart" {
+		candidate = sanitizeRemotePathComponent(repoURL)
+	}
+	if candidate == "" || candidate == "chart" {
+		candidate = "repo"
+	}
+	if !used[candidate] {
+		return candidate
+	}
+	sum := fmt.Sprintf("%x", sha1.Sum([]byte(repoURL)))
+	for idx := 0; ; idx++ {
+		suffix := sum[:6]
+		if idx > 0 {
+			suffix = fmt.Sprintf("%s-%d", suffix, idx)
+		}
+		name := fmt.Sprintf("%s-%s", candidate, suffix)
+		if !used[name] {
+			return name
+		}
+	}
+}
+
+func uniqueHelmRepoDefinitions(values []helmRepoDefinition) []helmRepoDefinition {
+	seen := map[string]bool{}
+	result := make([]helmRepoDefinition, 0, len(values))
+	for _, value := range values {
+		key := value.Name + "\x00" + value.URL
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 func pathWithinRoot(root, candidate string) bool {
@@ -162,6 +356,16 @@ func externalHelmChartPath(localChart string) string {
 	sum := fmt.Sprintf("%x", sha1.Sum([]byte(filepath.Clean(localChart))))
 	name := sanitizeRemotePathComponent(filepath.Base(localChart))
 	return remoteAppPath + "/.pullpreview/charts/" + sum[:12] + "/" + name
+}
+
+func externalHelmValuesPath(sourcePath string, content []byte) string {
+	hash := sha1.New()
+	_, _ = hash.Write([]byte(filepath.Clean(sourcePath)))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(content)
+	sum := fmt.Sprintf("%x", hash.Sum(nil))
+	name := sanitizeRemotePathComponent(filepath.Base(sourcePath))
+	return remoteAppPath + "/.pullpreview/helm-values/" + sum[:12] + "/" + name
 }
 
 func sanitizeRemotePathComponent(value string) string {
@@ -187,19 +391,24 @@ func sanitizeRemotePathComponent(value string) string {
 	return name
 }
 
-func (i *Instance) helmValueArgs(appPath string) ([]string, bool, error) {
+func (i *Instance) helmValueArgs(appPath string) (plan helmValuePlan, err error) {
+	defer func() {
+		if err != nil {
+			plan.cleanup()
+		}
+	}()
+
 	if len(i.ChartValues) == 0 && len(i.ChartSet) == 0 {
-		return nil, false, nil
+		return plan, nil
 	}
 
 	absAppPath, err := filepath.Abs(appPath)
 	if err != nil {
-		return nil, false, err
+		return plan, err
 	}
 
-	args := []string{}
-	requiresSync := false
-	for _, raw := range i.ChartValues {
+	tempDir := ""
+	for idx, raw := range i.ChartValues {
 		valuePath := strings.TrimSpace(raw)
 		if valuePath == "" {
 			continue
@@ -208,24 +417,47 @@ func (i *Instance) helmValueArgs(appPath string) ([]string, bool, error) {
 			valuePath = filepath.Join(absAppPath, valuePath)
 		}
 		valuePath = filepath.Clean(valuePath)
-		if _, err := os.Stat(valuePath); err != nil {
-			return nil, false, fmt.Errorf("unable to access chart values file %s: %w", raw, err)
+		content, readErr := os.ReadFile(valuePath)
+		if readErr != nil {
+			return plan, fmt.Errorf("unable to access chart values file %s: %w", raw, readErr)
 		}
-		remotePath, err := remoteBindSource(valuePath, absAppPath, remoteAppPath)
-		if err != nil {
-			return nil, false, fmt.Errorf("chart values %s: %w", raw, err)
+		rendered := []byte(i.expandDeploymentValue(string(content)))
+		if pathWithinRoot(absAppPath, valuePath) && bytes.Equal(content, rendered) {
+			remotePath, bindErr := remoteBindSource(valuePath, absAppPath, remoteAppPath)
+			if bindErr != nil {
+				return plan, fmt.Errorf("chart values %s: %w", raw, bindErr)
+			}
+			plan.Args = append(plan.Args, "--values", remotePath)
+			plan.RequiresAppSync = true
+			continue
 		}
-		args = append(args, "--values", remotePath)
-		requiresSync = true
+
+		if tempDir == "" {
+			tempDir, err = os.MkdirTemp("", "pullpreview-helm-values-*")
+			if err != nil {
+				return plan, err
+			}
+			plan.TempDirs = append(plan.TempDirs, tempDir)
+		}
+		tempPath := filepath.Join(tempDir, fmt.Sprintf("%02d-%s", idx, filepath.Base(valuePath)))
+		if err := os.WriteFile(tempPath, rendered, 0600); err != nil {
+			return plan, fmt.Errorf("write rendered chart values %s: %w", raw, err)
+		}
+		remotePath := externalHelmValuesPath(valuePath, rendered)
+		plan.ExtraSyncPaths = append(plan.ExtraSyncPaths, helmSyncPath{
+			Local:  tempPath,
+			Remote: remotePath,
+		})
+		plan.Args = append(plan.Args, "--values", remotePath)
 	}
 	for _, raw := range i.ChartSet {
 		value := strings.TrimSpace(raw)
 		if value == "" {
 			continue
 		}
-		args = append(args, "--set", i.expandDeploymentValue(value))
+		plan.Args = append(plan.Args, "--set", i.expandDeploymentValue(value))
 	}
-	return args, requiresSync, nil
+	return plan, nil
 }
 
 func (i *Instance) syncRemoteAppTree(appPath string) error {
@@ -321,13 +553,29 @@ func (i *Instance) runHelmDeployment(source helmChartSource, valueArgs []string)
 		"export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",
 		fmt.Sprintf("kubectl create namespace %s --dry-run=client -o yaml | kubectl apply -f - >/dev/null", shellQuote(namespace)),
 	}
-	if source.RepoURL != "" {
-		lines = append(lines,
-			fmt.Sprintf("helm repo add pullpreview %s --force-update >/dev/null", shellQuote(source.RepoURL)),
-			"helm repo update pullpreview >/dev/null",
-		)
+	manifest := i.renderHelmCaddyManifest(namespace, upstreamHost, target.Port)
+	lines = append(lines,
+		"cat <<'EOF' >/tmp/pullpreview-caddy.yaml",
+		manifest,
+		"EOF",
+		"kubectl apply -f /tmp/pullpreview-caddy.yaml >/dev/null",
+		fmt.Sprintf("kubectl rollout restart deployment/pullpreview-caddy -n %s >/dev/null", shellQuote(namespace)),
+		fmt.Sprintf("kubectl rollout status deployment/pullpreview-caddy -n %s --timeout=10m", shellQuote(namespace)),
+	)
+	repoDefs := source.RepoDefs
+	if len(repoDefs) == 0 && strings.TrimSpace(source.RepoURL) != "" {
+		repoDefs = []helmRepoDefinition{{Name: "pullpreview", URL: source.RepoURL}}
+	}
+	if len(repoDefs) > 0 {
+		for _, repo := range repoDefs {
+			lines = append(lines, fmt.Sprintf("helm repo add %s %s --force-update >/dev/null", shellQuote(repo.Name), shellQuote(repo.URL)))
+		}
+		lines = append(lines, "helm repo update >/dev/null")
 	}
 	if source.LocalChart != "" {
+		for _, ref := range source.DependencyBuildRefs {
+			lines = append(lines, fmt.Sprintf("helm dependency build %s >/dev/null", shellQuote(ref)))
+		}
 		lines = append(lines, fmt.Sprintf("helm dependency build %s >/dev/null", shellQuote(source.ChartRef)))
 	}
 
@@ -337,18 +585,10 @@ func (i *Instance) runHelmDeployment(source helmChartSource, valueArgs []string)
 		"--create-namespace",
 		"--wait",
 		"--atomic",
+		"--timeout", helmDeployTimeout,
 	}
 	helmArgs = append(helmArgs, valueArgs...)
 	lines = append(lines, shellJoin(helmArgs...))
-
-	manifest := i.renderHelmCaddyManifest(namespace, upstreamHost, target.Port)
-	lines = append(lines,
-		"cat <<'EOF' >/tmp/pullpreview-caddy.yaml",
-		manifest,
-		"EOF",
-		"kubectl apply -f /tmp/pullpreview-caddy.yaml >/dev/null",
-		fmt.Sprintf("kubectl rollout status deployment/pullpreview-caddy -n %s --timeout=10m", shellQuote(namespace)),
-	)
 
 	if i.Logger != nil {
 		i.Logger.Infof("Deploying Helm release=%s namespace=%s chart=%s", helmReleaseName, namespace, source.ChartRef)
@@ -364,7 +604,28 @@ func shellJoin(args ...string) string {
 	return strings.Join(quoted, " ")
 }
 
+func (i *Instance) helmProxyTLSPublicHosts() []string {
+	hosts := []string{i.PublicDNS()}
+	for _, raw := range i.ProxyTLSHosts {
+		hosts = append(hosts, i.expandDeploymentValue(raw))
+	}
+	return uniqueStrings(hosts)
+}
+
 func (i *Instance) renderHelmCaddyManifest(namespace, upstreamHost string, upstreamPort int) string {
+	var caddySites strings.Builder
+	for _, host := range i.helmProxyTLSPublicHosts() {
+		caddySites.WriteString(fmt.Sprintf(`    %s {
+      reverse_proxy %s:%d {
+        header_up Host {host}
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 443
+      }
+    }
+`, host, upstreamHost, upstreamPort))
+	}
+
 	return fmt.Sprintf(`apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -372,9 +633,7 @@ metadata:
   namespace: %s
 data:
   Caddyfile: |
-    %s {
-      reverse_proxy %s:%d
-    }
+%s
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -433,7 +692,7 @@ spec:
           hostPath:
             path: /var/lib/pullpreview/caddy-config
             type: DirectoryOrCreate
-`, namespace, i.PublicDNS(), upstreamHost, upstreamPort, namespace)
+`, namespace, caddySites.String(), namespace)
 }
 
 func (i *Instance) emitHelmFailureReport() {

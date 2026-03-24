@@ -113,6 +113,15 @@ func TestValidateDeploymentConfigRejectsComposeWithHelmOptions(t *testing.T) {
 	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "require deployment_target=helm") {
 		t.Fatalf("expected compose/helm validation error, got %v", err)
 	}
+
+	inst = NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetCompose,
+		ProxyTLSHosts:    []string{"nextcloud.example.test"},
+	}, fakeProvider{}, nil)
+
+	if err := inst.ValidateDeploymentConfig(); err == nil || !strings.Contains(err.Error(), "proxy_tls_hosts") {
+		t.Fatalf("expected proxy_tls_hosts validation error, got %v", err)
+	}
 }
 
 func TestValidateDeploymentConfigAcceptsHelmForLightsailProvider(t *testing.T) {
@@ -170,7 +179,11 @@ func TestExpandDeploymentValue(t *testing.T) {
 		Chart:            "wordpress",
 		ChartRepository:  "https://charts.bitnami.com/bitnami",
 		ProxyTLS:         "{{ release_name }}-wordpress:80",
-		DNS:              "rev2.click",
+		ProxyTLSHosts: []string{
+			"nextcloud.{{ pullpreview_public_dns }}",
+			"keycloak.{{ pullpreview_public_dns }}",
+		},
+		DNS: "rev2.click",
 	}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
 
@@ -209,6 +222,81 @@ func TestResolveHelmChartSourceForLocalChart(t *testing.T) {
 	}
 	if !source.SyncAppTree {
 		t.Fatalf("expected in-tree chart to sync app tree")
+	}
+}
+
+func TestResolveHelmChartSourceCollectsRemoteDependencyRepos(t *testing.T) {
+	appPath := t.TempDir()
+	chartPath := filepath.Join(appPath, "charts", "demo")
+	nestedPath := filepath.Join(appPath, "charts", "local-subchart")
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.MkdirAll(nestedPath, 0755); err != nil {
+		t.Fatalf("mkdir nested chart path: %v", err)
+	}
+	chartYAML := `apiVersion: v2
+name: demo
+version: 0.1.0
+dependencies:
+  - name: local-subchart
+    repository: file://../local-subchart
+    version: 0.1.0
+  - name: nextcloud
+    repository: https://nextcloud.github.io/helm
+    version: 7.0.0
+  - name: keycloak
+    repository: https://charts.bitnami.com/bitnami
+    version: 24.7.5
+`
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte(chartYAML), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+	nestedChartYAML := `apiVersion: v2
+name: local-subchart
+version: 0.1.0
+dependencies:
+  - name: traefik
+    repository: https://traefik.github.io/charts
+    version: 39.0.5
+`
+	if err := os.WriteFile(filepath.Join(nestedPath, "Chart.yaml"), []byte(nestedChartYAML), 0644); err != nil {
+		t.Fatalf("write nested chart: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	source, err := inst.resolveHelmChartSource(appPath)
+	if err != nil {
+		t.Fatalf("resolveHelmChartSource() error: %v", err)
+	}
+	if len(source.RepoDefs) != 3 {
+		t.Fatalf("expected three remote repo defs, got %#v", source.RepoDefs)
+	}
+	gotRepos := map[string]string{}
+	for _, repo := range source.RepoDefs {
+		gotRepos[repo.Name] = repo.URL
+	}
+	wantRepos := map[string]string{
+		"nextcloud": "https://nextcloud.github.io/helm",
+		"keycloak":  "https://charts.bitnami.com/bitnami",
+		"traefik":   "https://traefik.github.io/charts",
+	}
+	if len(gotRepos) != len(wantRepos) {
+		t.Fatalf("unexpected repo defs: %#v", source.RepoDefs)
+	}
+	for name, url := range wantRepos {
+		if gotRepos[name] != url {
+			t.Fatalf("expected repo %q=%q, got %#v", name, url, source.RepoDefs)
+		}
+	}
+	if len(source.DependencyBuildRefs) != 1 || source.DependencyBuildRefs[0] != "/app/charts/local-subchart" {
+		t.Fatalf("unexpected dependency build refs: %#v", source.DependencyBuildRefs)
 	}
 }
 
@@ -289,7 +377,7 @@ func TestResolveHelmChartSourceForOCIChart(t *testing.T) {
 	}
 }
 
-func TestHelmValueArgsExpandsPlaceholdersAndSyncsValuesFiles(t *testing.T) {
+func TestHelmValueArgsKeepsPlainInTreeValuesOnAppSyncPath(t *testing.T) {
 	appPath := t.TempDir()
 	for _, path := range []string{
 		filepath.Join(appPath, "values.yaml"),
@@ -318,10 +406,11 @@ func TestHelmValueArgsExpandsPlaceholdersAndSyncsValuesFiles(t *testing.T) {
 	}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
 
-	args, requiresSync, err := inst.helmValueArgs(appPath)
+	plan, err := inst.helmValueArgs(appPath)
 	if err != nil {
 		t.Fatalf("helmValueArgs() error: %v", err)
 	}
+	defer plan.cleanup()
 	want := []string{
 		"--values", "/app/values.yaml",
 		"--values", "/app/overrides/preview.yaml",
@@ -329,16 +418,173 @@ func TestHelmValueArgsExpandsPlaceholdersAndSyncsValuesFiles(t *testing.T) {
 		"--set", "ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click",
 		"--set", "url=https://Demo-App-ip-1-2-3-4.rev2.click:443",
 	}
-	if len(args) != len(want) {
-		t.Fatalf("unexpected helm args length: got=%#v want=%#v", args, want)
+	if len(plan.Args) != len(want) {
+		t.Fatalf("unexpected helm args length: got=%#v want=%#v", plan.Args, want)
 	}
 	for idx := range want {
-		if args[idx] != want[idx] {
-			t.Fatalf("unexpected helm arg %d: got=%q want=%q all=%#v", idx, args[idx], want[idx], args)
+		if plan.Args[idx] != want[idx] {
+			t.Fatalf("unexpected helm arg %d: got=%q want=%q all=%#v", idx, plan.Args[idx], want[idx], plan.Args)
 		}
 	}
-	if !requiresSync {
+	if !plan.RequiresAppSync {
 		t.Fatalf("expected local values files to require sync")
+	}
+	if len(plan.ExtraSyncPaths) != 0 {
+		t.Fatalf("did not expect rendered values sync paths, got %#v", plan.ExtraSyncPaths)
+	}
+}
+
+func TestHelmValueArgsRendersTemplatedValuesFiles(t *testing.T) {
+	appPath := t.TempDir()
+	valuePath := filepath.Join(appPath, "values.preview.yaml")
+	content := strings.Join([]string{
+		"ingress:",
+		"  hostname: {{ pullpreview_public_dns }}",
+		"  url: {{pullpreview_url}}",
+		"  namespace: {{ namespace }}",
+		"",
+	}, "\n")
+	if err := os.WriteFile(valuePath, []byte(content), 0644); err != nil {
+		t.Fatalf("write values file: %v", err)
+	}
+
+	inst := NewInstance("Demo App", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ChartValues:      []string{"values.preview.yaml"},
+		ProxyTLS:         "{{ release_name }}-wordpress:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	plan, err := inst.helmValueArgs(appPath)
+	if err != nil {
+		t.Fatalf("helmValueArgs() error: %v", err)
+	}
+	defer plan.cleanup()
+
+	if plan.RequiresAppSync {
+		t.Fatalf("did not expect rendered values file to reuse app tree sync path")
+	}
+	if len(plan.ExtraSyncPaths) != 1 {
+		t.Fatalf("expected one rendered values sync path, got %#v", plan.ExtraSyncPaths)
+	}
+	if len(plan.Args) != 2 || plan.Args[0] != "--values" {
+		t.Fatalf("unexpected helm args: %#v", plan.Args)
+	}
+	remotePath := plan.Args[1]
+	if remotePath != plan.ExtraSyncPaths[0].Remote {
+		t.Fatalf("expected helm args to reference rendered remote path, args=%#v sync=%#v", plan.Args, plan.ExtraSyncPaths)
+	}
+	if !strings.HasPrefix(remotePath, "/app/.pullpreview/helm-values/") {
+		t.Fatalf("unexpected rendered remote path: %q", remotePath)
+	}
+	rendered, err := os.ReadFile(plan.ExtraSyncPaths[0].Local)
+	if err != nil {
+		t.Fatalf("read rendered values file: %v", err)
+	}
+	wantRendered := strings.Join([]string{
+		"ingress:",
+		"  hostname: Demo-App-ip-1-2-3-4.rev2.click",
+		"  url: https://Demo-App-ip-1-2-3-4.rev2.click:443",
+		"  namespace: pp-demo-app",
+		"",
+	}, "\n")
+	if string(rendered) != wantRendered {
+		t.Fatalf("unexpected rendered values file:\n%s", rendered)
+	}
+}
+
+func TestHelmValueArgsStagesValuesFilesOutsideAppPath(t *testing.T) {
+	root := t.TempDir()
+	appPath := filepath.Join(root, "app")
+	externalRoot := filepath.Join(root, "shared")
+	if err := os.MkdirAll(appPath, 0755); err != nil {
+		t.Fatalf("mkdir app path: %v", err)
+	}
+	if err := os.MkdirAll(externalRoot, 0755); err != nil {
+		t.Fatalf("mkdir external root: %v", err)
+	}
+	externalPath := filepath.Join(externalRoot, "values.yaml")
+	if err := os.WriteFile(externalPath, []byte("key: value\n"), 0644); err != nil {
+		t.Fatalf("write external values file: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ChartValues:      []string{externalPath},
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	plan, err := inst.helmValueArgs(appPath)
+	if err != nil {
+		t.Fatalf("helmValueArgs() error: %v", err)
+	}
+	defer plan.cleanup()
+
+	if plan.RequiresAppSync {
+		t.Fatalf("did not expect external values file to trigger app tree sync")
+	}
+	if len(plan.ExtraSyncPaths) != 1 {
+		t.Fatalf("expected one staged external values file, got %#v", plan.ExtraSyncPaths)
+	}
+	if len(plan.Args) != 2 || plan.Args[1] != plan.ExtraSyncPaths[0].Remote {
+		t.Fatalf("unexpected helm args for external values file: %#v", plan.Args)
+	}
+	if !strings.HasPrefix(plan.ExtraSyncPaths[0].Remote, "/app/.pullpreview/helm-values/") {
+		t.Fatalf("unexpected remote values path: %#v", plan.ExtraSyncPaths)
+	}
+}
+
+func TestDeployWithHelmSyncsRenderedValuesFiles(t *testing.T) {
+	appPath := t.TempDir()
+	chartPath := filepath.Join(appPath, "charts", "demo")
+	valuePath := filepath.Join(appPath, "values.preview.yaml")
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: demo\nversion: 0.1.0\n"), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+	if err := os.WriteFile(valuePath, []byte("host: {{ pullpreview_public_dns }}\n"), 0644); err != nil {
+		t.Fatalf("write values file: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ChartValues:      []string{"values.preview.yaml"},
+		ProxyTLS:         "demo:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	if err := inst.DeployWithHelm(appPath); err != nil {
+		t.Fatalf("DeployWithHelm() error: %v", err)
+	}
+
+	foundRenderedSync := false
+	foundRenderedArg := false
+	for idx, args := range runner.args {
+		joined := strings.Join(args, " ")
+		if len(args) > 0 && args[0] == "rsync" && strings.Contains(joined, "/app/.pullpreview/helm-values/") {
+			foundRenderedSync = true
+		}
+		if idx < len(runner.inputs) && strings.Contains(runner.inputs[idx], "/app/.pullpreview/helm-values/") {
+			foundRenderedArg = true
+		}
+	}
+	if !foundRenderedSync {
+		t.Fatalf("expected rendered values sync, commands: %#v", runner.args)
+	}
+	if !foundRenderedArg {
+		t.Fatalf("expected helm command to reference rendered values path, scripts: %#v", runner.inputs)
 	}
 }
 
@@ -348,7 +594,11 @@ func TestRunHelmDeploymentBuildsExpectedScriptForRepoChart(t *testing.T) {
 		Chart:            "wordpress",
 		ChartRepository:  "https://charts.bitnami.com/bitnami",
 		ProxyTLS:         "{{ release_name }}-wordpress:80",
-		DNS:              "rev2.click",
+		ProxyTLSHosts: []string{
+			"nextcloud.{{ pullpreview_public_dns }}",
+			"keycloak.{{ pullpreview_public_dns }}",
+		},
+		DNS: "rev2.click",
 	}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE", CertKey: "CERT"}
 	runner := &scriptCaptureRunner{}
@@ -379,12 +629,15 @@ func TestRunHelmDeploymentBuildsExpectedScriptForRepoChart(t *testing.T) {
 		"source /etc/pullpreview/env",
 		"export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",
 		"kubectl create namespace 'pp-demo-app' --dry-run=client -o yaml | kubectl apply -f - >/dev/null",
-		"helm repo add pullpreview 'https://charts.bitnami.com/bitnami' --force-update >/dev/null",
-		"helm repo update pullpreview >/dev/null",
-		"'helm' 'upgrade' '--install' 'app' 'pullpreview/wordpress' '--namespace' 'pp-demo-app' '--create-namespace' '--wait' '--atomic' '--values' '/app/values.yaml' '--set' 'service.type=ClusterIP' '--set' 'ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click'",
+		"helm repo add 'pullpreview' 'https://charts.bitnami.com/bitnami' --force-update >/dev/null",
+		"helm repo update >/dev/null",
+		"'helm' 'upgrade' '--install' 'app' 'pullpreview/wordpress' '--namespace' 'pp-demo-app' '--create-namespace' '--wait' '--atomic' '--timeout' '15m' '--values' '/app/values.yaml' '--set' 'service.type=ClusterIP' '--set' 'ingress.hostname=Demo-App-ip-1-2-3-4.rev2.click'",
 		"cat <<'EOF' >/tmp/pullpreview-caddy.yaml",
 		"Demo-App-ip-1-2-3-4.rev2.click {",
+		"nextcloud.Demo-App-ip-1-2-3-4.rev2.click {",
+		"keycloak.Demo-App-ip-1-2-3-4.rev2.click {",
 		"reverse_proxy app-wordpress.pp-demo-app.svc.cluster.local:80",
+		"kubectl rollout restart deployment/pullpreview-caddy -n 'pp-demo-app' >/dev/null",
 		"kubectl rollout status deployment/pullpreview-caddy -n 'pp-demo-app' --timeout=10m",
 	}
 	for _, check := range checks {
@@ -423,12 +676,114 @@ func TestRunHelmDeploymentBuildsDependencyStepForLocalChart(t *testing.T) {
 	}
 }
 
+func TestRunHelmDeploymentAddsRemoteReposForLocalChartDependencies(t *testing.T) {
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ProxyTLS:         "app-wordpress:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	err := inst.runHelmDeployment(helmChartSource{
+		ChartRef:            "/app/charts/demo",
+		LocalChart:          "/tmp/demo",
+		DependencyBuildRefs: []string{"/app/charts/local-subchart"},
+		RepoDefs: []helmRepoDefinition{
+			{Name: "nextcloud", URL: "https://nextcloud.github.io/helm"},
+			{Name: "bitnami", URL: "https://charts.bitnami.com/bitnami"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("runHelmDeployment() error: %v", err)
+	}
+	script := runner.inputs[0]
+	checks := []string{
+		"helm repo add 'nextcloud' 'https://nextcloud.github.io/helm' --force-update >/dev/null",
+		"helm repo add 'bitnami' 'https://charts.bitnami.com/bitnami' --force-update >/dev/null",
+		"helm repo update >/dev/null",
+		"helm dependency build '/app/charts/local-subchart' >/dev/null",
+		"helm dependency build '/app/charts/demo' >/dev/null",
+	}
+	for _, check := range checks {
+		if !strings.Contains(script, check) {
+			t.Fatalf("expected script to contain %q, script:\n%s", check, script)
+		}
+	}
+}
+
+func TestDeployWithHelmSyncsExternalLocalDependencies(t *testing.T) {
+	appPath := t.TempDir()
+	chartPath := filepath.Join(appPath, "charts", "demo")
+	externalDepRoot := filepath.Join(t.TempDir(), "external")
+	externalDepPath := filepath.Join(externalDepRoot, "shared-chart")
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.MkdirAll(externalDepPath, 0755); err != nil {
+		t.Fatalf("mkdir external dependency path: %v", err)
+	}
+	chartYAML := `apiVersion: v2
+name: demo
+version: 0.1.0
+dependencies:
+  - name: shared-chart
+    repository: file://` + externalDepPath + `
+    version: 0.1.0
+`
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte(chartYAML), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(externalDepPath, "Chart.yaml"), []byte("apiVersion: v2\nname: shared-chart\nversion: 0.1.0\n"), 0644); err != nil {
+		t.Fatalf("write external chart: %v", err)
+	}
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	if err := inst.DeployWithHelm(appPath); err != nil {
+		t.Fatalf("DeployWithHelm() error: %v", err)
+	}
+	foundAppSync := false
+	foundExternalSync := false
+	foundHelmBuild := false
+	for idx, args := range runner.args {
+		joined := strings.Join(args, " ")
+		if len(args) > 0 && args[0] == "rsync" && strings.Contains(joined, remoteAppPath+"/") {
+			foundAppSync = true
+		}
+		if len(args) > 0 && args[0] == "rsync" && strings.Contains(joined, externalHelmChartPath(externalDepPath)) {
+			foundExternalSync = true
+		}
+		if idx < len(runner.inputs) && strings.Contains(runner.inputs[idx], "helm dependency build '"+externalHelmChartPath(externalDepPath)+"' >/dev/null") {
+			foundHelmBuild = true
+		}
+	}
+	if !foundAppSync {
+		t.Fatalf("expected app tree sync, commands: %#v", runner.args)
+	}
+	if !foundExternalSync {
+		t.Fatalf("expected external dependency sync, commands: %#v", runner.args)
+	}
+	if !foundHelmBuild {
+		t.Fatalf("expected helm dependency build for external dependency, scripts: %#v", runner.inputs)
+	}
+}
+
 func TestRenderHelmCaddyManifest(t *testing.T) {
 	inst := NewInstance("demo", CommonOptions{
 		DeploymentTarget: DeploymentTargetHelm,
 		Chart:            "wordpress",
 		ChartRepository:  "https://charts.bitnami.com/bitnami",
 		ProxyTLS:         "app-wordpress:80",
+		ProxyTLSHosts:    []string{"nextcloud.{{ pullpreview_public_dns }}", "keycloak.{{ pullpreview_public_dns }}"},
 		DNS:              "rev2.click",
 	}, fakeProvider{}, nil)
 	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
@@ -443,7 +798,23 @@ func TestRenderHelmCaddyManifest(t *testing.T) {
 	if !strings.Contains(manifest, "demo-ip-1-2-3-4.rev2.click") {
 		t.Fatalf("expected public DNS in manifest: %s", manifest)
 	}
+	if !strings.Contains(manifest, "nextcloud.demo-ip-1-2-3-4.rev2.click") {
+		t.Fatalf("expected nextcloud host in manifest: %s", manifest)
+	}
+	if !strings.Contains(manifest, "keycloak.demo-ip-1-2-3-4.rev2.click") {
+		t.Fatalf("expected keycloak host in manifest: %s", manifest)
+	}
 	if !strings.Contains(manifest, "reverse_proxy app-wordpress.pp-demo.svc.cluster.local:80") {
 		t.Fatalf("expected reverse proxy upstream in manifest: %s", manifest)
+	}
+	for _, header := range []string{
+		"header_up Host {host}",
+		"header_up X-Forwarded-Host {host}",
+		"header_up X-Forwarded-Proto https",
+		"header_up X-Forwarded-Port 443",
+	} {
+		if !strings.Contains(manifest, header) {
+			t.Fatalf("expected proxy header %q in manifest: %s", header, manifest)
+		}
 	}
 }

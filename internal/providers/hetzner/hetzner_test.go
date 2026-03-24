@@ -928,7 +928,7 @@ func mustNewProviderWithContext(t *testing.T, cfg Config) *Provider {
 
 func makeTestServer(name, ip string, status hcloud.ServerStatus, serverType *hcloud.ServerType) *hcloud.Server {
 	if serverType == nil {
-		serverType = &hcloud.ServerType{Name: "cpx21"}
+		serverType = &hcloud.ServerType{Name: "cpx22"}
 	}
 	return &hcloud.Server{
 		Name:       name,
