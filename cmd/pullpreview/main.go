@@ -115,6 +115,7 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 	fs := flag.NewFlagSet("github-sync", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "Enable verbose mode")
 	label := fs.String("label", "pullpreview", "Label to use for triggering preview deployments")
+	forceAction := fs.String("force-action", "", "Override event-derived action selection (up|down)")
 	deploymentVariant := fs.String("deployment-variant", "", "Deployment variant (4 chars max)")
 	ttl := fs.String("ttl", "infinite", "Maximum time to live for deployments (e.g. 10h, 5d, infinite)")
 	templatedURL := fs.String("templated-url", "", "Template for the preview URL (use {{ pullpreview_url }} as placeholder)")
@@ -137,6 +138,7 @@ func runGithubSync(ctx context.Context, args []string, logger *pullpreview.Logge
 	opts := pullpreview.GithubSyncOptions{
 		AppPath:           appPath,
 		Label:             *label,
+		ForceAction:       *forceAction,
 		DeploymentVariant: *deploymentVariant,
 		TTL:               *ttl,
 		TemplatedURL:      *templatedURL,
@@ -194,6 +196,7 @@ type commonFlagValues struct {
 	chartRepository string
 	chartValues     string
 	chartSet        string
+	proxyTLSHosts   string
 	tags            multiValue
 	options         pullpreview.CommonOptions
 }
@@ -208,6 +211,7 @@ func registerCommonFlags(fs *flag.FlagSet) *commonFlagValues {
 	fs.StringVar(&values.registries, "registries", "", "URIs of docker registries to authenticate against")
 	fs.StringVar((*string)(&values.options.DeploymentTarget), "deployment-target", string(pullpreview.DeploymentTargetCompose), "Deployment target to use: compose or helm")
 	fs.StringVar(&values.options.ProxyTLS, "proxy-tls", "", "Enable automatic HTTPS proxying with Let's Encrypt (format: service:port, e.g. web:80)")
+	fs.StringVar(&values.proxyTLSHosts, "proxy-tls-hosts", "", "Additional public hostnames served by the Helm proxy, comma-separated")
 	fs.StringVar(&values.options.DNS, "dns", "my.preview.run", "DNS suffix to use")
 	fs.StringVar(&values.ports, "ports", "80/tcp,443/tcp", "Ports to open for external access")
 	fs.StringVar(&values.options.InstanceType, "instance-type", "small", "Instance type to use")
@@ -240,6 +244,7 @@ func (c *commonFlagValues) ToOptions(ctx context.Context) pullpreview.CommonOpti
 	opts.ChartRepository = strings.TrimSpace(c.chartRepository)
 	opts.ChartValues = splitCommaList(c.chartValues)
 	opts.ChartSet = splitCommaList(c.chartSet)
+	opts.ProxyTLSHosts = splitCommaList(c.proxyTLSHosts)
 	opts.Tags = parseTags(c.tags)
 	return opts
 }

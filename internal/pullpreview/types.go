@@ -79,6 +79,7 @@ type CommonOptions struct {
 	CIDRs            []string
 	Registries       []string
 	ProxyTLS         string
+	ProxyTLSHosts    []string
 	DNS              string
 	Ports            []string
 	InstanceType     string
@@ -122,6 +123,7 @@ type ListOptions struct {
 type GithubSyncOptions struct {
 	AppPath           string
 	Label             string
+	ForceAction       string
 	DeploymentVariant string
 	TTL               string
 	TemplatedURL      string

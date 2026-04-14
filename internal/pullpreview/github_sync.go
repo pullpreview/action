@@ -97,6 +97,11 @@ type GithubSync struct {
 	runDown  func(DownOptions, Provider, *Logger) error
 }
 
+const (
+	forceActionUp   = "up"
+	forceActionDown = "down"
+)
+
 func RunGithubSync(opts GithubSyncOptions, provider Provider, logger *Logger) error {
 	opts.Context = EnsureContext(opts.Context)
 	if opts.Common.Context == nil {
@@ -460,7 +465,10 @@ func (g *GithubSync) Sync() error {
 	if err := g.validateDeploymentVariant(); err != nil {
 		return err
 	}
-	action := g.guessAction()
+	action, err := g.resolveAction()
+	if err != nil {
+		return err
+	}
 	if action == actionIgnored {
 		if g.logger != nil {
 			g.logger.Infof("Ignoring event %s", g.ignoredEventDetails())
@@ -582,6 +590,25 @@ func (g *GithubSync) guessAction() actionType {
 		return actionIgnored
 	}
 	return actionIgnored
+}
+
+func (g *GithubSync) resolveAction() (actionType, error) {
+	switch g.forceAction() {
+	case forceActionUp:
+		if g.prNumber() != 0 {
+			return actionPRUp, nil
+		}
+		return actionPRPush, nil
+	case forceActionDown:
+		if g.prNumber() != 0 {
+			return actionPRDown, nil
+		}
+		return actionBranchDown, nil
+	case "":
+		return g.guessAction(), nil
+	default:
+		return actionIgnored, fmt.Errorf("--force-action must be one of: up, down")
+	}
 }
 
 func (g *GithubSync) updateGitHubStatus(status deploymentStatus, url string) error {
@@ -1150,6 +1177,10 @@ func (g *GithubSync) deploymentVariant() string {
 	return variant
 }
 
+func (g *GithubSync) forceAction() string {
+	return strings.ToLower(strings.TrimSpace(g.opts.ForceAction))
+}
+
 func (g *GithubSync) validateDeploymentVariant() error {
 	variant := strings.TrimSpace(g.opts.DeploymentVariant)
 	if variant != "" && len(variant) > 4 {
@@ -1305,6 +1336,7 @@ func instanceToCommon(inst *Instance) CommonOptions {
 		CIDRs:            inst.CIDRs,
 		Registries:       inst.Registries,
 		ProxyTLS:         inst.ProxyTLS,
+		ProxyTLSHosts:    inst.ProxyTLSHosts,
 		DNS:              inst.DNS,
 		Ports:            inst.Ports,
 		InstanceType:     inst.Size,

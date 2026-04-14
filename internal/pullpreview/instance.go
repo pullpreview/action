@@ -74,6 +74,7 @@ type Instance struct {
 	DNS              string
 	Ports            []string
 	ProxyTLS         string
+	ProxyTLSHosts    []string
 	Provider         Provider
 	Registries       []string
 	Size             string
@@ -113,6 +114,7 @@ func NewInstance(name string, opts CommonOptions, provider Provider, logger *Log
 		DNS:              defaultString(opts.DNS, "my.preview.run"),
 		Ports:            opts.Ports,
 		ProxyTLS:         proxyTLS,
+		ProxyTLSHosts:    uniqueStrings(opts.ProxyTLSHosts),
 		Provider:         provider,
 		Registries:       opts.Registries,
 		Size:             opts.InstanceType,
@@ -184,8 +186,8 @@ func (i *Instance) ValidateDeploymentConfig() error {
 
 	switch i.DeploymentTarget {
 	case DeploymentTargetCompose:
-		if strings.TrimSpace(i.Chart) != "" || strings.TrimSpace(i.ChartRepository) != "" || len(i.ChartValues) > 0 || len(i.ChartSet) > 0 {
-			return fmt.Errorf("chart, chart_repository, chart_values, and chart_set require deployment_target=helm")
+		if strings.TrimSpace(i.Chart) != "" || strings.TrimSpace(i.ChartRepository) != "" || len(i.ChartValues) > 0 || len(i.ChartSet) > 0 || len(i.ProxyTLSHosts) > 0 {
+			return fmt.Errorf("chart, chart_repository, chart_values, chart_set, and proxy_tls_hosts require deployment_target=helm")
 		}
 	case DeploymentTargetHelm:
 		if !providerSupportsDeploymentTarget(i.Provider, DeploymentTargetHelm) {

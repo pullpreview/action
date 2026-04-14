@@ -49,6 +49,8 @@ When the label is removed, the preview environment is automatically destroyed.
 
 Full documentation lives in the [wiki](https://github.com/pullpreview/action/wiki).
 
+For Helm deployments, `chart_values` accepts both plain YAML files and optional `*.gotmpl` files. Plain YAML files keep the existing behavior and only expand PullPreview placeholders such as `{{ pullpreview_public_dns }}`, while `*.gotmpl` files are also rendered locally on the runner with a small env/template function set including `env`, `requiredEnv`, `indent`, `nindent`, `quote`, `default`, and `trim`.
+
 ### Getting started
 
 - [Getting Started](https://github.com/pullpreview/action/wiki/Getting-Started)
