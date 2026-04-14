@@ -7,7 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
+	"text/template"
 
 	"gopkg.in/yaml.v3"
 )
@@ -391,6 +394,104 @@ func sanitizeRemotePathComponent(value string) string {
 	return name
 }
 
+func templateString(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func templateIndent(spaces int, value any) string {
+	pad := strings.Repeat(" ", spaces)
+	lines := strings.Split(templateString(value), "\n")
+	for idx, line := range lines {
+		lines[idx] = pad + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func templateNindent(spaces int, value any) string {
+	return "\n" + templateIndent(spaces, value)
+}
+
+func templateRequiredEnv(name string) (string, error) {
+	value, ok := os.LookupEnv(name)
+	if !ok || value == "" {
+		return "", fmt.Errorf("required environment variable %q is not set", name)
+	}
+	return value, nil
+}
+
+func templateDefault(defaultValue, value any) any {
+	if templateEmpty(value) {
+		return defaultValue
+	}
+	return value
+}
+
+func templateEmpty(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Bool:
+		return !v.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return v.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() == 0
+	case reflect.Interface, reflect.Pointer:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
+func (i *Instance) renderHelmValuesFile(path string, content []byte) ([]byte, error) {
+	rendered := i.expandDeploymentValue(string(content))
+	if !strings.HasSuffix(path, ".gotmpl") {
+		return []byte(rendered), nil
+	}
+
+	tmpl, err := template.New(filepath.Base(path)).
+		Option("missingkey=error").
+		Funcs(template.FuncMap{
+			"default":                templateDefault,
+			"env":                    os.Getenv,
+			"indent":                 templateIndent,
+			"namespace":              i.HelmNamespace,
+			"nindent":                templateNindent,
+			"pullpreview_public_dns": i.PublicDNS,
+			"pullpreview_public_ip":  i.PublicIP,
+			"pullpreview_url":        i.URL,
+			"quote":                  strconv.Quote,
+			"release_name":           func() string { return helmReleaseName },
+			"requiredEnv":            templateRequiredEnv,
+			"trim":                   strings.TrimSpace,
+		}).
+		Parse(rendered)
+	if err != nil {
+		return nil, fmt.Errorf("render chart values %s: parse template: %w", path, err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, nil); err != nil {
+		return nil, fmt.Errorf("render chart values %s: execute template: %w", path, err)
+	}
+	return buf.Bytes(), nil
+}
+
 func (i *Instance) helmValueArgs(appPath string) (plan helmValuePlan, err error) {
 	defer func() {
 		if err != nil {
@@ -421,7 +522,10 @@ func (i *Instance) helmValueArgs(appPath string) (plan helmValuePlan, err error)
 		if readErr != nil {
 			return plan, fmt.Errorf("unable to access chart values file %s: %w", raw, readErr)
 		}
-		rendered := []byte(i.expandDeploymentValue(string(content)))
+		rendered, renderErr := i.renderHelmValuesFile(raw, content)
+		if renderErr != nil {
+			return plan, renderErr
+		}
 		if pathWithinRoot(absAppPath, valuePath) && bytes.Equal(content, rendered) {
 			remotePath, bindErr := remoteBindSource(valuePath, absAppPath, remoteAppPath)
 			if bindErr != nil {

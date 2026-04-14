@@ -434,7 +434,7 @@ func TestHelmValueArgsKeepsPlainInTreeValuesOnAppSyncPath(t *testing.T) {
 	}
 }
 
-func TestHelmValueArgsRendersTemplatedValuesFiles(t *testing.T) {
+func TestHelmValueArgsRendersPlaceholderExpandedValuesFiles(t *testing.T) {
 	appPath := t.TempDir()
 	valuePath := filepath.Join(appPath, "values.preview.yaml")
 	content := strings.Join([]string{
@@ -493,6 +493,91 @@ func TestHelmValueArgsRendersTemplatedValuesFiles(t *testing.T) {
 	}, "\n")
 	if string(rendered) != wantRendered {
 		t.Fatalf("unexpected rendered values file:\n%s", rendered)
+	}
+}
+
+func TestHelmValueArgsRendersGotmplValuesFiles(t *testing.T) {
+	appPath := t.TempDir()
+	valuePath := filepath.Join(appPath, "values.preview.yaml.gotmpl")
+	content := strings.Join([]string{
+		"hostname: {{ pullpreview_public_dns | quote }}",
+		"token: |",
+		"{{ requiredEnv \"OPENPROJECT_ENTERPRISE_TOKEN\" | indent 2 }}",
+		"",
+	}, "\n")
+	if err := os.WriteFile(valuePath, []byte(content), 0644); err != nil {
+		t.Fatalf("write values file: %v", err)
+	}
+	t.Setenv("OPENPROJECT_ENTERPRISE_TOKEN", "line1,with,commas\nline2")
+
+	inst := NewInstance("Demo App", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ChartValues:      []string{"values.preview.yaml.gotmpl"},
+		ProxyTLS:         "{{ release_name }}-wordpress:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	plan, err := inst.helmValueArgs(appPath)
+	if err != nil {
+		t.Fatalf("helmValueArgs() error: %v", err)
+	}
+	defer plan.cleanup()
+
+	if plan.RequiresAppSync {
+		t.Fatalf("did not expect rendered gotmpl values file to reuse app tree sync path")
+	}
+	if len(plan.ExtraSyncPaths) != 1 {
+		t.Fatalf("expected one rendered gotmpl values sync path, got %#v", plan.ExtraSyncPaths)
+	}
+	rendered, err := os.ReadFile(plan.ExtraSyncPaths[0].Local)
+	if err != nil {
+		t.Fatalf("read rendered values file: %v", err)
+	}
+	wantRendered := strings.Join([]string{
+		"hostname: \"Demo-App-ip-1-2-3-4.rev2.click\"",
+		"token: |",
+		"  line1,with,commas",
+		"  line2",
+		"",
+	}, "\n")
+	if string(rendered) != wantRendered {
+		t.Fatalf("unexpected rendered gotmpl values file:\n%s", rendered)
+	}
+}
+
+func TestHelmValueArgsFailsForMissingRequiredGotmplEnv(t *testing.T) {
+	appPath := t.TempDir()
+	valuePath := filepath.Join(appPath, "values.preview.yaml.gotmpl")
+	content := strings.Join([]string{
+		"token: {{ requiredEnv \"OPENPROJECT_ENTERPRISE_TOKEN\" }}",
+		"",
+	}, "\n")
+	if err := os.WriteFile(valuePath, []byte(content), 0644); err != nil {
+		t.Fatalf("write values file: %v", err)
+	}
+
+	inst := NewInstance("Demo App", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "wordpress",
+		ChartRepository:  "https://charts.bitnami.com/bitnami",
+		ChartValues:      []string{"values.preview.yaml.gotmpl"},
+		ProxyTLS:         "{{ release_name }}-wordpress:80",
+		DNS:              "rev2.click",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root"}
+
+	_, err := inst.helmValueArgs(appPath)
+	if err == nil {
+		t.Fatal("expected helmValueArgs() to fail for missing required env")
+	}
+	if !strings.Contains(err.Error(), "values.preview.yaml.gotmpl") {
+		t.Fatalf("expected error to mention values file, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "OPENPROJECT_ENTERPRISE_TOKEN") {
+		t.Fatalf("expected error to mention required env, got %v", err)
 	}
 }
 
@@ -585,6 +670,54 @@ func TestDeployWithHelmSyncsRenderedValuesFiles(t *testing.T) {
 	}
 	if !foundRenderedArg {
 		t.Fatalf("expected helm command to reference rendered values path, scripts: %#v", runner.inputs)
+	}
+}
+
+func TestDeployWithHelmSyncsRenderedGotmplValuesFiles(t *testing.T) {
+	appPath := t.TempDir()
+	chartPath := filepath.Join(appPath, "charts", "demo")
+	valuePath := filepath.Join(appPath, "values.preview.yaml.gotmpl")
+	if err := os.MkdirAll(chartPath, 0755); err != nil {
+		t.Fatalf("mkdir chart path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: demo\nversion: 0.1.0\n"), 0644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+	if err := os.WriteFile(valuePath, []byte("token: {{ requiredEnv \"OPENPROJECT_ENTERPRISE_TOKEN\" | quote }}\n"), 0644); err != nil {
+		t.Fatalf("write values file: %v", err)
+	}
+	t.Setenv("OPENPROJECT_ENTERPRISE_TOKEN", "ent-token")
+
+	inst := NewInstance("demo", CommonOptions{
+		DeploymentTarget: DeploymentTargetHelm,
+		Chart:            "charts/demo",
+		ChartValues:      []string{"values.preview.yaml.gotmpl"},
+		ProxyTLS:         "demo:80",
+	}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{IPAddress: "1.2.3.4", Username: "root", PrivateKey: "PRIVATE"}
+	runner := &scriptCaptureRunner{}
+	inst.Runner = runner
+
+	if err := inst.DeployWithHelm(appPath); err != nil {
+		t.Fatalf("DeployWithHelm() error: %v", err)
+	}
+
+	foundRenderedSync := false
+	foundRenderedArg := false
+	for idx, args := range runner.args {
+		joined := strings.Join(args, " ")
+		if len(args) > 0 && args[0] == "rsync" && strings.Contains(joined, "/app/.pullpreview/helm-values/") {
+			foundRenderedSync = true
+		}
+		if idx < len(runner.inputs) && strings.Contains(runner.inputs[idx], "/app/.pullpreview/helm-values/") {
+			foundRenderedArg = true
+		}
+	}
+	if !foundRenderedSync {
+		t.Fatalf("expected rendered gotmpl values sync, commands: %#v", runner.args)
+	}
+	if !foundRenderedArg {
+		t.Fatalf("expected helm command to reference rendered gotmpl values path, scripts: %#v", runner.inputs)
 	}
 }
 

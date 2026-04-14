@@ -62,7 +62,7 @@ inputs:
     required: false
     default: ""
   chart_values:
-    description: "Helm values files relative to app_path, comma-separated (helm target only)"
+    description: "Helm values files relative to app_path, comma-separated (helm target only). Plain YAML stays unchanged except for PullPreview placeholders; *.gotmpl files also support local env/template rendering."
     required: false
     default: ""
   chart_set:
