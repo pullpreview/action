@@ -314,6 +314,9 @@ func TestHandoffExpiringSSHAccessUsesRunScopedKey(t *testing.T) {
 	if !strings.Contains(runner.calls[0].input, "pullpreview-run") {
 		t.Fatalf("bootstrap did not append the run-scoped public key: %q", runner.calls[0].input)
 	}
+	if !strings.Contains(runner.calls[0].input, `expiry-time="`) {
+		t.Fatalf("run-scoped public key has no server-enforced expiry: %q", runner.calls[0].input)
+	}
 	if inst.Access.CertKey != "" || !inst.Access.ExpiresAt.IsZero() {
 		t.Fatalf("temporary certificate remained active: %#v", inst.Access)
 	}
@@ -339,6 +342,23 @@ func TestHandoffExpiringSSHAccessUsesRunScopedKey(t *testing.T) {
 	}
 	if inst.runSSHPublicKey != "" {
 		t.Fatalf("run-scoped public key remained after cleanup: %q", inst.runSSHPublicKey)
+	}
+}
+
+func TestGenerateRunSSHKeyPairIncludesServerEnforcedExpiry(t *testing.T) {
+	expiresAt := time.Date(2026, time.August, 10, 14, 30, 45, 0, time.FixedZone("test", 2*60*60))
+	publicKey, privateKey, err := generateRunSSHKeyPair(expiresAt)
+	if err != nil {
+		t.Fatalf("generateRunSSHKeyPair() error: %v", err)
+	}
+	if !strings.HasPrefix(publicKey, `expiry-time="20260810123045Z" ssh-ed25519 `) {
+		t.Fatalf("unexpected authorized key expiry: %q", publicKey)
+	}
+	if !strings.HasSuffix(publicKey, " pullpreview-run") {
+		t.Fatalf("authorized key has no run marker: %q", publicKey)
+	}
+	if _, err := ssh.ParsePrivateKey([]byte(privateKey)); err != nil {
+		t.Fatalf("run-scoped private key is invalid: %v", err)
 	}
 }
 

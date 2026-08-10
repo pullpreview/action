@@ -23,6 +23,7 @@ const (
 	remoteAppPath              = "/app"
 	instanceSSHReadyInterval   = 5 * time.Second
 	instanceSSHReadyWaitWindow = 5 * time.Minute
+	runSSHAccessTTL            = 12 * time.Hour
 	sshReadyDiagnosticCommand  = `if test -f /etc/pullpreview/ready; then
   echo ready-marker-present
   exit 0
@@ -455,7 +456,7 @@ func (i *Instance) handoffExpiringSSHAccess() error {
 		return nil
 	}
 
-	publicKey, privateKey, err := generateRunSSHKeyPair()
+	publicKey, privateKey, err := generateRunSSHKeyPair(time.Now().Add(runSSHAccessTTL))
 	if err != nil {
 		return err
 	}
@@ -492,7 +493,7 @@ func (i *Instance) cleanupRunSSHAccess() error {
 	return nil
 }
 
-func generateRunSSHKeyPair() (string, string, error) {
+func generateRunSSHKeyPair(expiresAt time.Time) (string, string, error) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", "", err
@@ -509,7 +510,8 @@ func generateRunSSHKeyPair() (string, string, error) {
 	if privatePEM == nil {
 		return "", "", errors.New("unable to encode run-scoped SSH private key")
 	}
-	authorizedKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(publicKey))) + " pullpreview-run"
+	key := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(publicKey)))
+	authorizedKey := fmt.Sprintf("expiry-time=\"%s\" %s pullpreview-run", expiresAt.UTC().Format("20060102150405Z"), key)
 	return authorizedKey, strings.TrimSpace(string(privatePEM)), nil
 }
 
