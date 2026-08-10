@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ls "github.com/aws/aws-sdk-go-v2/service/lightsail"
@@ -278,6 +279,30 @@ func TestLaunchInstanceCreatesFreshInstanceForCompose(t *testing.T) {
 	}
 	if client.createInstancesCalls != 1 {
 		t.Fatalf("expected create instance call, got %d", client.createInstancesCalls)
+	}
+}
+
+func TestFetchAccessDetailsIncludesExpiry(t *testing.T) {
+	expiresAt := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second)
+	client := &fakeLightsailClient{
+		getInstanceAccessDetailsOutput: &ls.GetInstanceAccessDetailsOutput{
+			AccessDetails: &types.InstanceAccessDetails{
+				Username:   aws.String("ec2-user"),
+				IpAddress:  aws.String("1.2.3.4"),
+				CertKey:    aws.String("CERT"),
+				PrivateKey: aws.String("PRIVATE"),
+				ExpiresAt:  aws.Time(expiresAt),
+			},
+		},
+	}
+	provider := &Provider{client: client, ctx: context.Background(), region: DefaultRegion}
+
+	access, err := provider.fetchAccessDetails("demo")
+	if err != nil {
+		t.Fatalf("fetchAccessDetails() error: %v", err)
+	}
+	if !access.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("ExpiresAt=%s, want %s", access.ExpiresAt, expiresAt)
 	}
 }
 

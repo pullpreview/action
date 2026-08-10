@@ -306,6 +306,7 @@ func (p *Provider) fetchAccessDetails(name string) (pullpreview.AccessDetails, e
 		IPAddress:  aws.ToString(resp.AccessDetails.IpAddress),
 		CertKey:    aws.ToString(resp.AccessDetails.CertKey),
 		PrivateKey: aws.ToString(resp.AccessDetails.PrivateKey),
+		ExpiresAt:  aws.ToTime(resp.AccessDetails.ExpiresAt),
 	}, nil
 }
 

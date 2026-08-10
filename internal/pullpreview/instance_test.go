@@ -3,11 +3,15 @@ package pullpreview
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type captureRunner struct {
@@ -17,6 +21,47 @@ type captureRunner struct {
 func (r *captureRunner) Run(cmd *exec.Cmd) error {
 	r.args = append(r.args, append([]string{}, cmd.Args...))
 	return nil
+}
+
+type sshCredentialCapture struct {
+	args       []string
+	input      string
+	privateKey string
+	certKey    string
+}
+
+type sshCredentialCaptureRunner struct {
+	calls []sshCredentialCapture
+	err   error
+}
+
+func (r *sshCredentialCaptureRunner) Run(cmd *exec.Cmd) error {
+	call := sshCredentialCapture{args: append([]string{}, cmd.Args...)}
+	if cmd.Stdin != nil {
+		input, err := io.ReadAll(cmd.Stdin)
+		if err != nil {
+			return err
+		}
+		call.input = string(input)
+	}
+	for idx, arg := range cmd.Args {
+		if arg == "-i" && idx+1 < len(cmd.Args) {
+			content, err := os.ReadFile(cmd.Args[idx+1])
+			if err != nil {
+				return err
+			}
+			call.privateKey = strings.TrimSpace(string(content))
+		}
+		if strings.HasPrefix(arg, "CertificateFile=") {
+			content, err := os.ReadFile(strings.TrimPrefix(arg, "CertificateFile="))
+			if err != nil {
+				return err
+			}
+			call.certKey = strings.TrimSpace(string(content))
+		}
+	}
+	r.calls = append(r.calls, call)
+	return r.err
 }
 
 type launchSpyProvider struct {
@@ -241,6 +286,118 @@ func TestSetupSSHAccessAppendsAuthorizedKeys(t *testing.T) {
 	command := strings.Join(runner.args[0], " ")
 	if !strings.Contains(command, "cat - >>") {
 		t.Fatalf("expected SetupSSHAccess to append authorized_keys, command: %s", command)
+	}
+}
+
+func TestHandoffExpiringSSHAccessUsesRunScopedKey(t *testing.T) {
+	expiresAt := time.Now().Add(10 * time.Minute)
+	inst := NewInstance("my-app", CommonOptions{}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{
+		IPAddress:  "1.2.3.4",
+		Username:   "ec2-user",
+		PrivateKey: "TEMP PRIVATE",
+		CertKey:    "TEMP CERT",
+		ExpiresAt:  expiresAt,
+	}
+	runner := &sshCredentialCaptureRunner{}
+	inst.Runner = runner
+
+	if err := inst.handoffExpiringSSHAccess(); err != nil {
+		t.Fatalf("handoffExpiringSSHAccess() error: %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected one bootstrap SSH call, got %d", len(runner.calls))
+	}
+	if runner.calls[0].privateKey != "TEMP PRIVATE" || runner.calls[0].certKey != "TEMP CERT" {
+		t.Fatalf("bootstrap did not use temporary access details: %#v", runner.calls[0])
+	}
+	if !strings.Contains(runner.calls[0].input, "pullpreview-run") {
+		t.Fatalf("bootstrap did not append the run-scoped public key: %q", runner.calls[0].input)
+	}
+	if !strings.Contains(runner.calls[0].input, `expiry-time="`) {
+		t.Fatalf("run-scoped public key has no server-enforced expiry: %q", runner.calls[0].input)
+	}
+	if inst.Access.CertKey != "" || !inst.Access.ExpiresAt.IsZero() {
+		t.Fatalf("temporary certificate remained active: %#v", inst.Access)
+	}
+	if _, err := ssh.ParsePrivateKey([]byte(inst.Access.PrivateKey)); err != nil {
+		t.Fatalf("run-scoped private key is invalid: %v", err)
+	}
+	if !strings.Contains(inst.runSSHPublicKey, "pullpreview-run") {
+		t.Fatalf("run-scoped public key was not retained for cleanup: %q", inst.runSSHPublicKey)
+	}
+
+	runPrivateKey := inst.Access.PrivateKey
+	if err := inst.cleanupRunSSHAccess(); err != nil {
+		t.Fatalf("cleanupRunSSHAccess() error: %v", err)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("expected cleanup SSH call, got %d calls", len(runner.calls))
+	}
+	if runner.calls[1].privateKey != runPrivateKey || runner.calls[1].certKey != "" {
+		t.Fatalf("cleanup did not use the run-scoped key: %#v", runner.calls[1])
+	}
+	if !strings.Contains(strings.Join(runner.calls[1].args, " "), "grep -Fvx") {
+		t.Fatalf("cleanup did not remove the run-scoped public key: %v", runner.calls[1].args)
+	}
+	if inst.runSSHPublicKey != "" {
+		t.Fatalf("run-scoped public key remained after cleanup: %q", inst.runSSHPublicKey)
+	}
+}
+
+func TestGenerateRunSSHKeyPairIncludesServerEnforcedExpiry(t *testing.T) {
+	expiresAt := time.Date(2026, time.August, 10, 14, 30, 45, 0, time.FixedZone("test", 2*60*60))
+	publicKey, privateKey, err := generateRunSSHKeyPair(expiresAt)
+	if err != nil {
+		t.Fatalf("generateRunSSHKeyPair() error: %v", err)
+	}
+	if !strings.HasPrefix(publicKey, `expiry-time="20260810123045Z" ssh-ed25519 `) {
+		t.Fatalf("unexpected authorized key expiry: %q", publicKey)
+	}
+	if !strings.HasSuffix(publicKey, " pullpreview-run") {
+		t.Fatalf("authorized key has no run marker: %q", publicKey)
+	}
+	if _, err := ssh.ParsePrivateKey([]byte(privateKey)); err != nil {
+		t.Fatalf("run-scoped private key is invalid: %v", err)
+	}
+}
+
+func TestHandoffExpiringSSHAccessLeavesCredentialsOnFailure(t *testing.T) {
+	expiresAt := time.Now().Add(10 * time.Minute)
+	inst := NewInstance("my-app", CommonOptions{}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{
+		PrivateKey: "TEMP PRIVATE",
+		CertKey:    "TEMP CERT",
+		ExpiresAt:  expiresAt,
+	}
+	inst.Runner = &sshCredentialCaptureRunner{err: errors.New("append failed")}
+
+	err := inst.handoffExpiringSSHAccess()
+	if err == nil || !strings.Contains(err.Error(), "append failed") {
+		t.Fatalf("expected append failure, got %v", err)
+	}
+	if inst.Access.PrivateKey != "TEMP PRIVATE" || inst.Access.CertKey != "TEMP CERT" || !inst.Access.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("temporary credentials changed after failed handoff: %#v", inst.Access)
+	}
+	if inst.runSSHPublicKey != "" {
+		t.Fatalf("failed handoff retained a cleanup key: %q", inst.runSSHPublicKey)
+	}
+}
+
+func TestHandoffExpiringSSHAccessSkipsNonExpiringCredentials(t *testing.T) {
+	inst := NewInstance("my-app", CommonOptions{}, fakeProvider{}, nil)
+	inst.Access = AccessDetails{PrivateKey: "PRIVATE"}
+	runner := &sshCredentialCaptureRunner{}
+	inst.Runner = runner
+
+	if err := inst.handoffExpiringSSHAccess(); err != nil {
+		t.Fatalf("handoffExpiringSSHAccess() error: %v", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("non-expiring credentials triggered SSH handoff: %#v", runner.calls)
+	}
+	if inst.Access.PrivateKey != "PRIVATE" {
+		t.Fatalf("non-expiring credentials changed: %#v", inst.Access)
 	}
 }
 

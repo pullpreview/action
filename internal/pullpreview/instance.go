@@ -3,6 +3,9 @@ package pullpreview
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +15,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 const (
 	remoteAppPath              = "/app"
 	instanceSSHReadyInterval   = 5 * time.Second
 	instanceSSHReadyWaitWindow = 5 * time.Minute
+	runSSHAccessTTL            = 12 * time.Hour
 	sshReadyDiagnosticCommand  = `if test -f /etc/pullpreview/ready; then
   echo ready-marker-present
   exit 0
@@ -82,6 +88,7 @@ type Instance struct {
 	Access           AccessDetails
 	Logger           *Logger
 	Runner           Runner
+	runSSHPublicKey  string
 }
 
 func NewInstance(name string, opts CommonOptions, provider Provider, logger *Logger) *Instance {
@@ -290,6 +297,9 @@ func (i *Instance) launchAndWait() error {
 	if i.Logger != nil {
 		i.Logger.Infof("Instance ssh access OK")
 	}
+	if err := i.handoffExpiringSSHAccess(); err != nil {
+		return fmt.Errorf("unable to establish deployment SSH access: %w", err)
+	}
 	return nil
 }
 
@@ -439,6 +449,70 @@ func (i *Instance) SetupSSHAccess() error {
 func (i *Instance) SetupPreScript() error {
 	script := BuildPreScript(i.Registries, i.PreScript, i.Logger)
 	return i.SCP(bytes.NewBufferString(script), "/tmp/pre_script.sh", "0755")
+}
+
+func (i *Instance) handoffExpiringSSHAccess() error {
+	if i.Access.ExpiresAt.IsZero() {
+		return nil
+	}
+
+	publicKey, privateKey, err := generateRunSSHKeyPair(time.Now().Add(runSSHAccessTTL))
+	if err != nil {
+		return err
+	}
+	content := publicKey + "\n"
+	homeDir := HomeDirForUser(i.Username())
+	if err := i.appendRemoteFile(bytes.NewBufferString(content), fmt.Sprintf("%s/.ssh/authorized_keys", homeDir), "0600"); err != nil {
+		return err
+	}
+
+	i.Access.PrivateKey = privateKey
+	i.Access.CertKey = ""
+	i.Access.ExpiresAt = time.Time{}
+	i.runSSHPublicKey = publicKey
+	if i.Logger != nil {
+		i.Logger.Infof("Established run-scoped SSH access for deployment")
+	}
+	return nil
+}
+
+func (i *Instance) cleanupRunSSHAccess() error {
+	if strings.TrimSpace(i.runSSHPublicKey) == "" {
+		return nil
+	}
+	homeDir := HomeDirForUser(i.Username())
+	target := fmt.Sprintf("%s/.ssh/authorized_keys", homeDir)
+	command := fmt.Sprintf(
+		"tmp=$(mktemp) && { grep -Fvx -- %s %s > \"$tmp\" || true; } && cat \"$tmp\" > %s && rm -f \"$tmp\" && chmod 0600 %s",
+		shellQuote(i.runSSHPublicKey), target, target, target,
+	)
+	if err := i.SSH(command, nil); err != nil {
+		return err
+	}
+	i.runSSHPublicKey = ""
+	return nil
+}
+
+func generateRunSSHKeyPair(expiresAt time.Time) (string, string, error) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+	publicKey, err := ssh.NewPublicKey(public)
+	if err != nil {
+		return "", "", err
+	}
+	privateBlock, err := ssh.MarshalPrivateKey(private, "pullpreview-run")
+	if err != nil {
+		return "", "", err
+	}
+	privatePEM := pem.EncodeToMemory(privateBlock)
+	if privatePEM == nil {
+		return "", "", errors.New("unable to encode run-scoped SSH private key")
+	}
+	key := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(publicKey)))
+	authorizedKey := fmt.Sprintf("expiry-time=\"%s\" %s pullpreview-run", expiresAt.UTC().Format("20060102150405Z"), key)
+	return authorizedKey, strings.TrimSpace(string(privatePEM)), nil
 }
 
 func (i *Instance) SCP(input io.Reader, target, mode string) error {
