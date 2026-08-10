@@ -34,6 +34,11 @@ func RunUp(opts UpOptions, provider Provider, logger *Logger) (*Instance, error)
 	if err := instance.LaunchAndWait(); err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err := instance.cleanupRunSSHAccess(); err != nil && logger != nil {
+			logger.Warnf("Unable to remove run-scoped SSH access: %v", err)
+		}
+	}()
 
 	if logger != nil {
 		logger.Infof("Synchronizing instance name=%s", instance.Name)

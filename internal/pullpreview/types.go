@@ -42,6 +42,7 @@ type AccessDetails struct {
 	IPAddress  string
 	CertKey    string
 	PrivateKey string
+	ExpiresAt  time.Time
 }
 
 type UserDataOptions struct {
