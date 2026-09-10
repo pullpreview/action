@@ -1,7 +1,6 @@
 #!/usr/bin/env ruby
 
 require "pathname"
-require "pry"
 require "slop"
 
 require_relative "../lib/pull_preview"
@@ -84,8 +83,6 @@ begin
     end
 
     PullPreview::GithubSync.run(app_path, opts.to_hash)
-  when "console"
-    binding.pry
   when "list"
     opts = Slop.parse do |o|
       o.banner = "Usage: pullpreview list org/repo [options]"
@@ -95,7 +92,7 @@ begin
     end
     PullPreview::List.run(opts)
   else
-    puts "Usage: pullpreview [up|down|list|console|github-sync] [options]"
+    puts "Usage: pullpreview [up|down|list|github-sync] [options]"
     exit 1
   end
 rescue PullPreview::Error, StandardError => e
