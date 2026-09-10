@@ -128,7 +128,7 @@ runs:
   using: "composite"
   steps:
     - name: Restore SSH key cache
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ runner.temp }}/pullpreview-ssh-keys
         key: pullpreview-ssh-keys-v1-${{ github.repository_id }}-${{ github.run_id }}
